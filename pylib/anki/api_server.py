@@ -6,10 +6,6 @@ from anki._backend import RustBackend
 
 
 def run_api_server(backend: RustBackend) -> None:
-    from os import environ as env
-
-    env["RUST_LOG"] = env.get("RUST_LOG", "anki=info")
-
     try:
         backend.api_server()
     except Exception as exc:

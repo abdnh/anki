@@ -1,6 +1,9 @@
 // Copyright: Ankitects Pty Ltd and contributors
 // License: GNU AGPL, version 3 or later; http://www.gnu.org/licenses/agpl.html
 
+mod logging;
+mod routes;
+
 use std::future::Future;
 use std::future::IntoFuture;
 use std::net::SocketAddr;
@@ -11,10 +14,9 @@ use axum::Router;
 use snafu::ResultExt;
 use snafu::Whatever;
 
+use crate::api::logging::with_logging_layer;
 use crate::backend::Backend;
 use crate::error;
-
-mod routes;
 
 pub struct ApiServer {}
 
@@ -25,7 +27,7 @@ impl ApiServer {
         backend: &'a Backend,
     ) -> error::Result<(SocketAddr, ServerFuture), Whatever> {
         let router = Router::new().route("/", get(|| async { "Hello, World!" }));
-        let router = routes::add_routes(backend, router);
+        let router = with_logging_layer(routes::add_routes(backend, router));
         let address = "0.0.0.0:8766";
         let listener = tokio::net::TcpListener::bind(address)
             .await
@@ -34,7 +36,7 @@ impl ApiServer {
         let future = axum::serve(listener, router)
             .with_graceful_shutdown(async { backend.wait_for_shutdown().await })
             .into_future();
-
+        tracing::info!(%addr, "API server started");
         Ok((addr, Box::pin(future)))
     }
 

@@ -4,14 +4,15 @@
 import json
 import sys
 
-import pip_system_certs.wrapt_requests
 import requests
-
-pip_system_certs.wrapt_requests.inject_truststore()
+import truststore
 
 
 def main():
     """Fetch and return all versions from PyPI, sorted by upload time."""
+
+    truststore.inject_into_ssl()
+
     url = "https://pypi.org/pypi/aqt/json"
 
     try:

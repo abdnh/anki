@@ -24,6 +24,7 @@ dev = [
   "types-markdown",
   "types-waitress",
   "types-pywin32",
+  "briefcase",
 ]
 
 [project.optional-dependencies]

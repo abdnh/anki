@@ -1,7 +1,7 @@
 [project]
 requires-python = ">=3.10"
-name = "anki_installer"
-# TODO: read actual version
+# FIXME: briefcase doesn't recognize calver
+# version = "{{ version }}"
 version = "0.0.1"
 
 # This project was generated with 0.3.26 using template: https://github.com/beeware/briefcase-template @ v0.3.26
@@ -23,12 +23,7 @@ sources = [
 icon = "resources/anki"
 console_app = false
 use_full_install_path = false
-
-requires = [
-  # TODO: platform-specific
-  "../../out/wheels/aqt-25.9.2-py3-none-any.whl[qt,audio]",
-  "../../out/wheels/anki-25.9.2-cp39-abi3-win_amd64.whl",
-]
+requires = ["{{ aqt_wheel }}[aqt,audio]", "{{ anki_wheel }}"]
 test_requires = [
 
 

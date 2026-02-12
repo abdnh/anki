@@ -25,6 +25,7 @@ dev = [
   "types-waitress",
   "types-pywin32",
   "briefcase",
+  "jinja2",
 ]
 
 [project.optional-dependencies]

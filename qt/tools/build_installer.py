@@ -25,7 +25,7 @@ def get_python_path() -> Path:
         python_path = pyenv_dir / "Scripts" / "python"
     else:
         python_path = pyenv_dir / "bin" / "python"
-    return python_path
+    return python_path.absolute()
 
 
 def main(aqt_wheel: str, anki_wheel: str, out_dir: Path) -> None:

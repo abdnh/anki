@@ -9,7 +9,7 @@ version = "0.0.1"
 project_name = "Anki"
 bundle = "net.ankiweb"
 url = "https://apps.ankiweb.net"
-license.file = "../../LICENSE"
+license.file = "LICENSE"
 author = "Damien Elmes"
 
 [tool.briefcase.app.anki_launcher]

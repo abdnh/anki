@@ -37,6 +37,7 @@ def main(aqt_wheel: str, anki_wheel: str, out_dir: Path) -> None:
     shutil.rmtree(out_dir, ignore_errors=True)
     shutil.copytree(installer_dir, out_dir)
     (out_dir / "pyproject.toml").write_text(template, encoding="utf-8")
+    shutil.copy("LICENSE", out_dir / "LICENSE")
     subprocess.check_call(
         [get_python_path(), "-m", "briefcase", "package"], cwd=out_dir
     )

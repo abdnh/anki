@@ -84,26 +84,26 @@ fn render_routes(backend_services: &[BackendService], buf: &mut String) -> Resul
     writeln!(
         buf,
         r#"
-#[derive(serde::Serialize)]
-struct ResponseData<T: serde::Serialize> (
-    #[serde(serialize_with = "serialize_result_flat")]
-    Result<T, anki_proto::backend::BackendError>
-);
+use axum::response::IntoResponse;
 
-fn serialize_result_flat<S, T, E>(
-    v: &Result<T, E>,
-    serializer: S,
-) -> std::result::Result<S::Ok, S::Error>
-where
-    S: serde::Serializer,
-    T: serde::Serialize,
-    E: serde::Serialize,
-{{
-    match v {{
-        Ok(value) => value.serialize(serializer),
-        Err(err) => err.serialize(serializer),
+fn result_to_response<T: Default + prost::Message + serde::Serialize>(
+    result: Result<T, anki_proto::backend::BackendError>,
+    content_type: crate::api::extract::ApiContentType,
+) -> axum::response::Response {{
+    match result {{
+        Ok(data) => crate::api::extract::ApiResponse::<T>::new(data.encode_to_vec().into(), content_type)
+                .into_response(),
+        Err(err) => (
+            axum::http::StatusCode::INTERNAL_SERVER_ERROR,
+            crate::api::extract::ApiResponse::<anki_proto::backend::BackendError>::new(
+                prost::Message::encode_to_vec(&err).into(),
+                content_type,
+            ),
+        )
+            .into_response(),
     }}
 }}
+
 "#
     )
     .unwrap();
@@ -117,11 +117,7 @@ where
         for method in service.all_methods() {
             let method_name = &method.name;
             let input_type = method.get_input_type();
-            let input_arg = if method.input_type().is_some() {
-                format!("axum::extract::Json(payload): axum::extract::Json<{input_type}>")
-            } else {
-                String::new()
-            };
+            // let input_arg = format!("request: ApiRequest<{input_type}>");
             let is_col_method = service
                 .delegating_methods
                 .iter()
@@ -136,7 +132,7 @@ where
                 }
             );
             let mut method_call = if method.input_type().is_some() {
-                format!("{service_name}::{method_name}({object}, payload)")
+                format!("{service_name}::{method_name}({object}, _payload)")
             } else {
                 format!("{service_name}::{method_name}({object})")
             };
@@ -150,10 +146,11 @@ where
                 buf,
                 r#"
 .route("/{method_name}",
-    axum::routing::post(async |{input_arg}| {{
-        let result = {method_call};
-        let status = if result.is_err() {{axum::http::StatusCode::INTERNAL_SERVER_ERROR}} else {{axum::http::StatusCode::OK}};
-        (status, axum::extract::Json(ResponseData(result)))
+    axum::routing::post(async |request: crate::api::extract::ApiRequest<{input_type}>| {{
+        request.data().map(|(content_type, _payload)| {{
+            let result = {method_call};
+            result_to_response(result, content_type)
+        }})
     }})
 )"#
             )

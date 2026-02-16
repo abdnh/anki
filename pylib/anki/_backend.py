@@ -92,8 +92,8 @@ class RustBackend(RustBackendGenerated):
     def syncserver() -> None:
         _rsbridge.syncserver()
 
-    def api_server(self) -> None:
-        self._backend.api_server()
+    def run_api_server(self) -> None:
+        self._backend.run_api_server()
 
     def shutdown_api_server(self) -> None:
         self._backend.shutdown_api_server()

@@ -64,8 +64,8 @@ pub struct BackendInner {
 
 struct BackendState {
     sync: SyncState,
-    shutdown_signal_sender: Option<Sender<()>>,
-    shutdown_signal_receiver: Option<Receiver<()>>,
+    api_server_shutdown_sender: Option<Sender<()>>,
+    api_server_shutdown_receiver: Option<Receiver<()>>,
 }
 
 pub fn init_backend(init_msg: &[u8]) -> result::Result<Backend, String> {
@@ -82,7 +82,6 @@ pub fn init_backend(init_msg: &[u8]) -> result::Result<Backend, String> {
 
 impl Backend {
     pub fn new(tr: I18n, server: bool) -> Backend {
-        let (shutdown_signal_sender, shutdown_signal_receiver) = tokio::sync::oneshot::channel();
         Backend(Arc::new(BackendInner {
             col: Mutex::new(None),
             tr,
@@ -95,8 +94,8 @@ impl Backend {
             runtime: OnceLock::new(),
             state: Mutex::new(BackendState {
                 sync: SyncState::default(),
-                shutdown_signal_sender: Some(shutdown_signal_sender),
-                shutdown_signal_receiver: Some(shutdown_signal_receiver),
+                api_server_shutdown_sender: None,
+                api_server_shutdown_receiver: None,
             }),
             backup_task: Mutex::new(None),
             media_sync_task: Mutex::new(None),
@@ -201,19 +200,26 @@ impl Backend {
         ThrottlingProgressHandler::new(self.progress_state.clone())
     }
 
-    pub fn set_shutdown_signal(&self) -> Result<(), String> {
-        if let Some(sender) = self.state.lock().unwrap().shutdown_signal_sender.take() {
+    pub fn set_api_server_running(&mut self) {
+        let (api_shutdown_sender, api_shutdown_receiver) = tokio::sync::oneshot::channel();
+        let mut guard = self.state.lock().unwrap();
+        guard.api_server_shutdown_sender = Some(api_shutdown_sender);
+        guard.api_server_shutdown_receiver = Some(api_shutdown_receiver);
+    }
+
+    pub fn shutdown_api_server(&self) -> Result<(), String> {
+        if let Some(sender) = self.state.lock().unwrap().api_server_shutdown_sender.take() {
             sender
                 .send(())
-                .map_err(|_| "Failed to set shutdown signal")?;
+                .map_err(|_| "Failed to set shut down API server")?;
         }
         Ok(())
     }
 
-    pub async fn wait_for_shutdown(&self) {
+    pub async fn wait_for_api_server_shutdown(&self) {
         let receiver_option = {
             let mut guard = self.state.lock().unwrap();
-            guard.shutdown_signal_receiver.take()
+            guard.api_server_shutdown_receiver.take()
         };
         if let Some(receiver) = receiver_option {
             receiver.await.unwrap();

@@ -11,6 +11,7 @@ pub enum I32ConfigKey {
     CsvDuplicateResolution,
     MatchScope,
     LastFsrsOptimize,
+    ApiServerPort,
 }
 
 impl Collection {

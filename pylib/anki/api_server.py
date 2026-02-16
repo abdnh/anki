@@ -7,6 +7,6 @@ from anki._backend import RustBackend
 
 def run_api_server(backend: RustBackend) -> None:
     try:
-        backend.api_server()
+        backend.run_api_server()
     except Exception as exc:
         print("API server failed:", exc)

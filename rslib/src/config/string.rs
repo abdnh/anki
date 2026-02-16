@@ -12,6 +12,7 @@ pub enum StringKey {
     SetDueReviewer,
     DefaultSearchText,
     CardStateCustomizer,
+    ApiServerHost,
 }
 
 impl Collection {

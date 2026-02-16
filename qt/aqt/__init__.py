@@ -784,12 +784,6 @@ def _run(argv: list[str] | None = None, exec: bool = True) -> AnkiApp | None:
 
     mw = aqt.main.AnkiQt(app, pm, backend, opts, args)
 
-    from anki.api_server import run_api_server
-
-    mw.taskman.run_in_background(
-        lambda: run_api_server(backend), lambda f: f.result(), uses_collection=False
-    )
-
     if exec:
         print("Starting main loop...")
         app.exec()

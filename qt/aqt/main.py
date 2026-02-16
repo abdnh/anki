@@ -609,7 +609,6 @@ class AnkiQt(QMainWindow):
         self.mediaServer.shutdown()
         # Rust background jobs are not awaited implicitly
         self.backend.await_backup_completion()
-        self.backend.shutdown_api_server()
         self.deleteLater()
         app = self.app
         app._unset_windows_shutdown_block_reason()
@@ -675,6 +674,15 @@ class AnkiQt(QMainWindow):
             self.update_undo_actions()
             gui_hooks.collection_did_load(self.col)
             self.apply_collection_options()
+
+            from anki.api_server import run_api_server
+
+            self.taskman.run_in_background(
+                lambda: run_api_server(self.backend),
+                lambda f: f.result(),
+                uses_collection=False,
+            )
+
             self.moveToState("deckBrowser")
         except Exception:
             # dump error to stderr so it gets picked up by errors.py
@@ -703,6 +711,7 @@ class AnkiQt(QMainWindow):
             self.setEnabled(False)
             self.maybe_auto_sync_on_open_close(after_sync)
 
+        self.backend.shutdown_api_server()
         self.closeAllWindows(before_sync)
 
     def _unloadCollection(self) -> None:

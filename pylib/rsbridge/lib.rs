@@ -84,6 +84,9 @@ impl Backend {
     fn run_api_server(&self, py: Python) -> PyResult<()> {
         let backend = Box::leak(Box::new(self.backend.clone()));
         py.allow_threads(|| {
+            self.backend
+                .shutdown_api_server()
+                .map_err(|e| PyException::new_err(e.to_string()))?;
             backend.set_api_server_running();
             ApiServer::run(backend).map_err(|e| PyException::new_err(e.to_string()))
         })

@@ -18,6 +18,7 @@ impl Collection {
     pub fn get_config_i32(&self, key: I32ConfigKey) -> i32 {
         #[allow(clippy::match_single_binding)]
         self.get_config_optional(key).unwrap_or(match key {
+            I32ConfigKey::ApiServerPort => 8766,
             _other => 0,
         })
     }

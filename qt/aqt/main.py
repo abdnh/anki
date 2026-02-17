@@ -675,13 +675,9 @@ class AnkiQt(QMainWindow):
             gui_hooks.collection_did_load(self.col)
             self.apply_collection_options()
 
-            from anki.api_server import run_api_server
+            from aqt.api_server import run_api_server_in_background
 
-            self.taskman.run_in_background(
-                lambda: run_api_server(self.backend),
-                lambda f: f.result(),
-                uses_collection=False,
-            )
+            run_api_server_in_background(self)
 
             self.moveToState("deckBrowser")
         except Exception:

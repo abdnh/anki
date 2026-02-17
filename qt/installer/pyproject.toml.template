@@ -12,12 +12,12 @@ url = "https://apps.ankiweb.net"
 license.file = "LICENSE"
 author = "Damien Elmes"
 
-[tool.briefcase.app.anki_launcher]
+[tool.briefcase.app.anki]
 formal_name = "Anki"
 description = "A spaced repetition program"
 long_description = """Anki is a flashcard program that helps you spend more time on challenging material, and less on what you already know."""
 sources = [
-  "src/anki_launcher",
+  "src/anki",
 ]
 
 icon = "resources/anki"
@@ -30,7 +30,7 @@ test_requires = [
   # Add your cross-platform test requirements here
 ]
 
-[tool.briefcase.app.anki_launcher.macOS]
+[tool.briefcase.app.anki.macOS]
 universal_build = true
 min_os_version = "12.0"
 requires = [
@@ -39,14 +39,14 @@ requires = [
   # Add your macOS-specific app requirements here
 ]
 
-[tool.briefcase.app.anki_launcher.linux]
+[tool.briefcase.app.anki.linux]
 requires = [
 
 
   # Add your Linux-specific app requirements here
 ]
 
-[tool.briefcase.app.anki_launcher.linux.system.debian]
+[tool.briefcase.app.anki.linux.system.debian]
 system_requires = [
 
 
@@ -59,7 +59,7 @@ system_runtime_requires = [
   # Add any system packages needed at runtime here
 ]
 
-[tool.briefcase.app.anki_launcher.linux.system.rhel]
+[tool.briefcase.app.anki.linux.system.rhel]
 system_requires = [
 
 
@@ -72,7 +72,7 @@ system_runtime_requires = [
   # Add any system packages needed at runtime here
 ]
 
-[tool.briefcase.app.anki_launcher.linux.system.suse]
+[tool.briefcase.app.anki.linux.system.suse]
 system_requires = [
 
 
@@ -85,7 +85,7 @@ system_runtime_requires = [
   # Add any system packages needed at runtime here
 ]
 
-[tool.briefcase.app.anki_launcher.linux.system.arch]
+[tool.briefcase.app.anki.linux.system.arch]
 system_requires = [
 
 
@@ -98,12 +98,12 @@ system_runtime_requires = [
   # Add any system packages needed at runtime here
 ]
 
-[tool.briefcase.app.anki_launcher.linux.flatpak]
+[tool.briefcase.app.anki.linux.flatpak]
 flatpak_runtime = "org.freedesktop.Platform"
 flatpak_runtime_version = "25.08"
 flatpak_sdk = "org.freedesktop.Sdk"
 
-[tool.briefcase.app.anki_launcher.windows]
+[tool.briefcase.app.anki.windows]
 requires = [
 
 
@@ -111,14 +111,14 @@ requires = [
 ]
 
 # Mobile deployments
-[tool.briefcase.app.anki_launcher.iOS]
+[tool.briefcase.app.anki.iOS]
 requires = [
 
 
   # Add your iOS-specific app requirements here
 ]
 
-[tool.briefcase.app.anki_launcher.android]
+[tool.briefcase.app.anki.android]
 requires = [
 
 
@@ -126,7 +126,7 @@ requires = [
 ]
 
 # Web deployments
-[tool.briefcase.app.anki_launcher.web]
+[tool.briefcase.app.anki.web]
 requires = [
 
 

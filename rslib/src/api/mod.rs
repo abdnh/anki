@@ -31,7 +31,7 @@ pub struct ApiServerConfig {
 impl Default for ApiServerConfig {
     fn default() -> Self {
         Self {
-            host: "0.0.0.0".parse().unwrap(),
+            host: "127.0.0.1".parse().unwrap(),
             port: 8766,
         }
     }

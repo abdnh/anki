@@ -20,7 +20,7 @@ impl Collection {
         let default = match key {
             StringKey::SetDueBrowser => "0",
             StringKey::SetDueReviewer => "1",
-            StringKey::ApiServerHost => "0.0.0.0",
+            StringKey::ApiServerHost => "127.0.0.1",
             _other => "",
         };
         self.get_config_optional(key)

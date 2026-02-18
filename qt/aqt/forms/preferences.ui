@@ -649,7 +649,7 @@
             <item>
              <widget class="QLineEdit" name="api_host">
               <property name="placeholderText">
-                <string notr="true">0.0.0.0</string>
+                <string notr="true">127.0.0.1</string>
               </property>
              </widget>
             </item>

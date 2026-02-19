@@ -21,6 +21,7 @@ use crate::backend::Backend;
 use crate::config::I32ConfigKey;
 use crate::config::StringKey;
 use crate::error;
+use crate::version::version;
 
 #[derive(Debug)]
 pub struct ApiServerConfig {
@@ -46,7 +47,7 @@ impl ApiServer {
         backend: &'a Backend,
         config: ApiServerConfig,
     ) -> error::Result<(SocketAddr, ServerFuture), Whatever> {
-        let router = Router::new().route("/", get(|| async { "Hello, World!" }));
+        let router = Router::new().route("/", get(|| async { format!("Anki {}", version()) }));
         let router = with_logging_layer(routes::add_routes(backend, router));
         let address = format!("{}:{}", config.host, config.port);
         let listener = tokio::net::TcpListener::bind(&address)

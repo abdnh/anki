@@ -1,10 +1,6 @@
 // Copyright: Ankitects Pty Ltd and contributors
 // License: GNU AGPL, version 3 or later; http://www.gnu.org/licenses/agpl.html
 
-use std::any::Any;
-use std::process::ExitCode;
-use std::process::Termination;
-
 use anki::api::ApiServer;
 use anki::backend::init_backend;
 use anki::backend::Backend as RustBackend;

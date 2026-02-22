@@ -5,6 +5,7 @@ mod adding;
 mod ankidroid;
 mod ankihub;
 mod ankiweb;
+mod api;
 mod card_rendering;
 mod collection;
 mod config;
@@ -15,6 +16,7 @@ mod import_export;
 mod ops;
 mod sync;
 
+use std::collections::HashMap;
 use std::ops::Deref;
 use std::result;
 use std::sync::Arc;
@@ -30,13 +32,14 @@ use tokio::runtime::Runtime;
 use tokio::sync::oneshot::Receiver;
 use tokio::sync::oneshot::Sender;
 
+use crate::api::services::FrontendRequest;
+use crate::api::services::PendingFrontendRequest;
 use crate::backend::dbproxy::db_command_bytes;
 use crate::backend::sync::SyncState;
 use crate::prelude::*;
 use crate::progress::Progress;
 use crate::progress::ProgressState;
 use crate::progress::ThrottlingProgressHandler;
-
 #[derive(Clone)]
 #[repr(transparent)]
 pub struct Backend(Arc<BackendInner>);
@@ -60,6 +63,8 @@ pub struct BackendInner {
     backup_task: Mutex<Option<JoinHandle<Result<()>>>>,
     media_sync_task: Mutex<Option<JoinHandle<Result<()>>>>,
     web_client: Mutex<Option<Client>>,
+    pub(crate) api_routes: Arc<Mutex<Vec<String>>>,
+    pub(crate) pending_api_requests: Arc<Mutex<HashMap<u64, PendingFrontendRequest>>>,
 }
 
 struct BackendState {
@@ -100,6 +105,8 @@ impl Backend {
             backup_task: Mutex::new(None),
             media_sync_task: Mutex::new(None),
             web_client: Mutex::new(None),
+            api_routes: Arc::new(Mutex::new(vec!["foo".to_string()])),
+            pending_api_requests: Arc::new(Mutex::new(HashMap::new())),
         }))
     }
 
@@ -224,5 +231,26 @@ impl Backend {
         if let Some(receiver) = receiver_option {
             receiver.await.unwrap();
         }
+    }
+
+    pub fn is_api_server_running(&self) -> bool {
+        self.state
+            .lock()
+            .unwrap()
+            .api_server_shutdown_sender
+            .is_some()
+    }
+
+    pub fn register_api_route(&self, route: String) {
+        self.api_routes.lock().unwrap().push(route);
+    }
+
+    pub fn get_pending_api_requests(&self) -> HashMap<u64, FrontendRequest> {
+        self.pending_api_requests
+            .lock()
+            .unwrap()
+            .iter_mut()
+            .filter_map(|(id, req)| req.0.take().map(|r| (*id, r)))
+            .collect()
     }
 }

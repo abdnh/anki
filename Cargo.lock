@@ -150,6 +150,7 @@ dependencies = [
  "tokio",
  "tokio-util",
  "tower-http",
+ "tower-service",
  "tracing",
  "tracing-appender",
  "tracing-subscriber",

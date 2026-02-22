@@ -4,6 +4,7 @@
 mod extract;
 mod logging;
 mod routes;
+pub mod services;
 
 use std::future::Future;
 use std::future::IntoFuture;
@@ -17,12 +18,12 @@ use snafu::ResultExt;
 use snafu::Whatever;
 
 use crate::api::logging::with_logging_layer;
+use crate::api::services::FrontendRouteService;
 use crate::backend::Backend;
 use crate::config::I32ConfigKey;
 use crate::config::StringKey;
 use crate::error;
 use crate::version::version;
-
 #[derive(Debug)]
 pub struct ApiServerConfig {
     pub host: IpAddr,
@@ -48,6 +49,11 @@ impl ApiServer {
         config: ApiServerConfig,
     ) -> error::Result<(SocketAddr, ServerFuture), Whatever> {
         let router = Router::new().route("/", get(|| async { format!("Anki {}", version()) }));
+        let frontend_service = FrontendRouteService::new(
+            backend.api_routes.clone(),
+            backend.pending_api_requests.clone(),
+        );
+        let router = router.route_service("/{*path}", frontend_service);
         let router = with_logging_layer(routes::add_routes(backend, router));
         let address = format!("{}:{}", config.host, config.port);
         let listener = tokio::net::TcpListener::bind(&address)

@@ -27,6 +27,7 @@ impl BuildAction for BuildInstaller {
         build.add_variable("version", &self.version);
         if cfg!(target_os = "linux") {
             build.add_variable("aqt_wheel", "_");
+            build.add_inputs("aqt_data", inputs![":qt:aqt:data"]);
         } else {
             build.add_inputs("aqt_wheel", inputs![":wheels:aqt"]);
         };

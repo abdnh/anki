@@ -40,12 +40,10 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Install packaging
-        run: pip install packaging
-
       - name: Compute versions and validate
         id: compute
         run: |
+          pip install packaging
           current_version=$(cat .version)
           echo "Current .version: $current_version"
 

@@ -202,7 +202,7 @@ jobs:
           path: out/installer/dist/
 
   release:
-    needs: [prepare, build-mac, build-windows, build-linux]
+    needs: [prepare, build-mac, build-mac-intel, build-windows, build-linux]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4

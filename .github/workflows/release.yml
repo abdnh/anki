@@ -3,21 +3,9 @@ name: Release
 on:
   workflow_dispatch:
     inputs:
-      release_type:
-        description: "Release type"
-        required: true
-        type: choice
-        options:
-          - beta
-          - official
       version:
-        description: "Version for official release (e.g. 25.10). Ignored for beta."
-        required: false
-        type: string
-      beta_number:
-        description: "Beta build number for same-day releases (default: 1)"
-        required: false
-        default: "1"
+        description: "Version (e.g. 26.04 for stable, 26.04b1 or 26.04rc1 for pre-release)"
+        required: true
         type: string
 
 permissions:
@@ -47,47 +35,15 @@ jobs:
           current_version=$(cat .version)
           echo "Current .version: $current_version"
 
-          if [ "${{ inputs.release_type }}" = "official" ]; then
-            version="${{ inputs.version }}"
-            if [ -z "$version" ]; then
-              echo "::error::version input is required for official releases"
-              exit 1
-            fi
+          version="${{ inputs.version }}"
 
-            # Validate PEP 440 format (digits separated by dots)
-            if ! echo "$version" | grep -qE '^[0-9]+(\.[0-9]+)*$'; then
-              echo "::error::version '$version' is not valid PEP 440"
-              exit 1
-            fi
+          # Validate PEP 440 format, check version order, detect stable vs pre-release
+          is_prerelease=$(python3 .github/workflows/validate_version.py "$version" "$current_version")
+          echo "Version check passed"
 
-            # Check version is greater than current
-            python3 -c "
-          from packaging.version import Version
-          import sys
-          if Version('$version') <= Version('$current_version'):
-              print(f'::error::version $version must be greater than current $current_version')
-              sys.exit(1)
-          "
-            echo "Version check passed"
-
-            pep440_version="$version"
-            tag_name="$version"
-            release_name="Anki $version"
-            is_prerelease="false"
-          else
-            beta_number="${{ inputs.beta_number }}"
-            if ! echo "$beta_number" | grep -qE '^[1-9][0-9]*$'; then
-              echo "::error::beta_number must be a positive integer, got '$beta_number'"
-              exit 1
-            fi
-
-            today=$(date -u +%Y%m%d)
-            today_dotted=$(date -u +%Y.%m.%d)
-            pep440_version="${current_version}.dev${today}"
-            tag_name="rc-${today_dotted}.${beta_number}"
-            release_name="Anki ${tag_name} (beta)"
-            is_prerelease="true"
-          fi
+          pep440_version="$version"
+          tag_name="$version"
+          release_name="Anki $version"
 
           # Check for duplicate tag
           if git rev-parse "refs/tags/${tag_name}" >/dev/null 2>&1; then
@@ -235,8 +191,8 @@ jobs:
           path: dist
           merge-multiple: true
 
-      - name: Update version, commit, and tag (official)
-        if: inputs.release_type == 'official'
+      - name: Update version, commit, and tag (stable)
+        if: needs.prepare.outputs.is_prerelease == 'false'
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
@@ -246,8 +202,8 @@ jobs:
           git tag '${{ needs.prepare.outputs.tag_name }}'
           git push origin HEAD '${{ needs.prepare.outputs.tag_name }}'
 
-      - name: Create and push tag (beta)
-        if: inputs.release_type == 'beta'
+      - name: Create and push tag (pre-release)
+        if: needs.prepare.outputs.is_prerelease == 'true'
         run: |
           git tag '${{ needs.prepare.outputs.tag_name }}'
           git push origin '${{ needs.prepare.outputs.tag_name }}'

@@ -15,6 +15,7 @@ jobs:
       - name: Build wheels
         run: |
           ./ninja wheels
+          sudo apt-get install --yes --no-install-recommends libc6-dev-arm64-cross gcc-aarch64-linux-gnu
           ./tools/build-arm-lin
 
       - name: Upload wheels

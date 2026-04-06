@@ -28,6 +28,7 @@ def sync() -> None:
         fetch_new_translations(module)
         push_new_templates(module)
     commit(".", "Update translations")
+    push(".")
 
 
 def check_clean() -> None:

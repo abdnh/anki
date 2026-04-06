@@ -95,15 +95,11 @@ jobs:
           submodules: true
           fetch-depth: 0
 
-      - name: Setup build environment
-        uses: ./.github/actions/setup-anki
-
       - name: Sync translations
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git remote rename origin ssh
-          ./ninja ftl-sync || true
+          python3 .github/workflows/sync_translations.py
         env:
           GH_TOKEN: ${{ github.token }}
 

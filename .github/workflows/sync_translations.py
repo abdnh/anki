@@ -5,7 +5,7 @@
 Update commit references to the latest translations,
 and copy source files to the translation repos.
 
-Rewritten for CI based on `./ninja ftl-sync`.
+Rewritten based on `./ninja ftl-sync` for CI.
 """
 
 import subprocess

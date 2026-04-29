@@ -316,8 +316,6 @@ jobs:
         with:
           name: wheels-linux-arm
           path: out/wheels/anki-*.whl
-    env:
-      ANKI_WHEEL_BUILD: 1
 
   build-linux-arm-installer:
     needs: prepare

@@ -55,6 +55,11 @@ fn normalize_version(version: &str) -> String {
 
 pub fn setup_venv(build: &mut Build) -> Result<()> {
     let extra_binary_exports = &["mypy", "ruff", "pytest", "protoc-gen-mypy"];
+    let extra_args = if std::env::var("ANKI_WHEEL_BUILD").ok().as_deref() == Some("1") {
+        "--all-packages"
+    } else {
+        "--all-packages --extra qt --extra audio"
+    };
     build.add_action(
         "pyenv",
         PythonEnvironment {
@@ -65,7 +70,7 @@ pub fn setup_venv(build: &mut Build) -> Result<()> {
                 "qt/pyproject.toml",
                 "uv.lock"
             ],
-            extra_args: "--all-packages --extra qt --extra audio",
+            extra_args,
             extra_binary_exports,
         },
     )?;

@@ -51,6 +51,8 @@ jobs:
         run: |
           mkdir -p "$RUNNER_TEMP/flathub"
           status=0
+          # Point the script and manifest at this repo, so that forks can test the workflow.
+          sed -i "s#ankitects/anki#$REPO#g" scripts/update-anki.py net.ankiweb.Anki.yaml
           uv run scripts/update-anki.py "$TAG_NAME" --report "$RUNNER_TEMP/flathub/report.md" || status=$?
           # 2 means the report lists problems to fix by hand.
           if [ "$status" != 0 ] && [ "$status" != 2 ]; then
@@ -58,6 +60,7 @@ jobs:
           fi
         env:
           GITHUB_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
 
       - name: Create patch
         id: patch

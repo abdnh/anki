@@ -7,11 +7,10 @@ import time
 from collections.abc import Callable
 from concurrent.futures import Future
 from datetime import datetime
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import aqt
 import aqt.forms
-import aqt.main
 from anki.collection import Collection
 from anki.errors import Interrupted
 from anki.utils import int_time
@@ -19,6 +18,9 @@ from aqt import gui_hooks
 from aqt.operations import QueryOp
 from aqt.qt import QDialog, QDialogButtonBox, QPushButton, Qt, QTimer, qconnect
 from aqt.utils import disable_help_button, show_info, tr
+
+if TYPE_CHECKING:
+    import aqt.main
 
 
 class MediaSyncer:

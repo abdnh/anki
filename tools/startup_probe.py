@@ -42,6 +42,7 @@ WATCHED_IMPORTS = (
     "aqt.qt",
     "aqt.main",
     "aqt.webview",
+    "aqt.webengine_profile",
     "aqt.mediasrv",
     "aqt.reviewer",
     "aqt.editor",
@@ -169,13 +170,32 @@ class ImportWatcher(importlib.abc.MetaPathFinder):
         loader.exec_module = exec_module
 
 
+_patched_modules: set[str] = set()
+
+
 def _on_module_loaded(fullname: str, module: Any) -> None:
+    if fullname in _patched_modules:
+        return
+    _patched_modules.add(fullname)
     if fullname == "aqt.mediasrv":
         _wrap_media_server(module)
     elif fullname == "aqt":
         REC.mark("aqt_imported")
         install_aqt_patches()
         install_hooks()
+        # older versions import these with aqt
+        for name in ("aqt.main", "aqt.webview"):
+            if name in sys.modules:
+                _on_module_loaded(name, sys.modules[name])
+    elif fullname == "aqt.main":
+        install_main_patches(module)
+    elif fullname == "aqt.webengine_profile":
+        _wrap_profile_creation(module, "new_profile")
+    elif fullname == "aqt.webview":
+        if "aqt.webengine_profile" not in _patched_modules:
+            # older versions
+            _wrap_profile_creation(module, "_profile_for_kind")
+        _wrap_webview(module.AnkiWebView)
 
 
 # Patching
@@ -206,20 +226,26 @@ def _wrap_first_call(owner: Any, attr: str, name: str, max_calls: int = 1) -> No
 
 def install_aqt_patches() -> None:
     import aqt
-    import aqt.main
-    import aqt.webview
 
     _wrap_first_call(aqt.AnkiApp, "__init__", "QApplication()")
     _wrap_first_call(aqt.ProfileManager, "setupMeta", "ProfileManager.setupMeta")
     _wrap_first_call(aqt, "setupGL", "setupGL", max_calls=2)
     _wrap_first_call(aqt, "setupLangAndBackend", "setupLangAndBackend")
-    _wrap_first_call(aqt.main.AnkiQt, "__init__", "AnkiQt()")
-    for method in MAIN_WINDOW_METHODS:
-        _wrap_first_call(aqt.main.AnkiQt, method, f"AnkiQt.{method}")
-    for func in MAIN_MODULE_FUNCTIONS:
-        _wrap_first_call(aqt.main, func, func)
+    _wrap_first_call(
+        aqt,
+        "init_webengine_and_import_modules",
+        "init_webengine_and_import_modules",
+    )
 
-    orig_init = aqt.main.AnkiQt.__init__
+
+def install_main_patches(main: Any) -> None:
+    _wrap_first_call(main.AnkiQt, "__init__", "AnkiQt()")
+    for method in MAIN_WINDOW_METHODS:
+        _wrap_first_call(main.AnkiQt, method, f"AnkiQt.{method}")
+    for func in MAIN_MODULE_FUNCTIONS:
+        _wrap_first_call(main, func, func)
+
+    orig_init = main.AnkiQt.__init__
 
     @functools.wraps(orig_init)
     def mw_init(self: Any, *args: Any, **kwargs: Any) -> None:
@@ -227,17 +253,14 @@ def install_aqt_patches() -> None:
         # The window is first shown later, from a timer.
         _install_window_filter(self)
 
-    aqt.main.AnkiQt.__init__ = mw_init  # type: ignore[method-assign]
-
-    _wrap_profile_creation(aqt.webview)
-    _wrap_webview(aqt.webview.AnkiWebView)
+    main.AnkiQt.__init__ = mw_init
 
 
-def _wrap_profile_creation(webview: Any) -> None:
-    owner, attr = webview, "_profile_for_kind"
+def _wrap_profile_creation(module: Any, attr: str) -> None:
+    owner = module
     if not hasattr(owner, attr):
         # older versions
-        owner, attr = webview.AnkiWebPage, "_profileForPage"
+        owner, attr = module.AnkiWebPage, "_profileForPage"
     orig = getattr(owner, attr, None)
     if orig is None:
         return

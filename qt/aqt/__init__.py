@@ -12,7 +12,7 @@ import logging
 import os
 import sys
 import threading
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from inspect import isclass
 from typing import TYPE_CHECKING, Any, Union, cast
 
@@ -92,6 +92,7 @@ if TYPE_CHECKING:
     import aqt.filtered_deck
     import aqt.profiles
     import aqt.stats
+    from aqt.main import AnkiQt
 
 # compat aliases
 anki.version = _version  # type: ignore
@@ -116,7 +117,6 @@ appShared = "https://ankiweb.net/shared/"
 appUpdate = "https://ankiweb.net/update/desktop"
 appHelpSite = HELP_SITE
 
-from aqt.main import AnkiQt  # isort:skip
 from aqt.profiles import ProfileManager, VideoDriver  # isort:skip
 
 profiler: cProfile.Profile | None = None
@@ -131,8 +131,8 @@ _LAZY_SUBMODULES = frozenset(
         "about addcards addcards_legacy ankihub browser changenotetype clayout "
         "deckchooser deckconf deckoptions editcurrent editcurrent_legacy editor "
         "editor_legacy fields filtered_deck import_export models notetypechooser "
-        "preferences previewer reviewer schema_change_tracker sidebar stats switch "
-        "url_schemes"
+        "main preferences previewer reviewer schema_change_tracker sidebar stats "
+        "switch url_schemes"
     ).split()
 )
 
@@ -141,7 +141,48 @@ if not TYPE_CHECKING:
     def __getattr__(name: str) -> Any:
         if name in _LAZY_SUBMODULES:
             return importlib.import_module(f"aqt.{name}")
+        if name == "AnkiQt":
+            return importlib.import_module("aqt.main").AnkiQt
         raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+
+
+# Imported on a background thread while QtWebEngine initializes, in the order
+# that 'import aqt' used to import them. They must not create Qt objects at
+# import time.
+_MODULES_IMPORTED_DURING_WEBENGINE_INIT = (
+    "aqt.main",
+    "aqt.mediasrv",
+    "aqt.deckbrowser",
+    "aqt.overview",
+    "aqt.reviewer",
+)
+
+
+def _import_modules(names: Sequence[str]) -> None:
+    for name in names:
+        try:
+            importlib.import_module(name)
+        except Exception:
+            # the main thread imports it again and reports the error
+            pass
+
+
+def init_webengine_and_import_modules() -> None:
+    """Create the first web profile, which takes hundreds of milliseconds, and
+    import the modules that startup needs next in the meantime. The profile is
+    created with the GIL released. The thread is joined before the main thread
+    continues, so the threads never import at the same time."""
+    from aqt.webengine_profile import create_early_profile
+
+    thread = threading.Thread(
+        target=_import_modules,
+        args=(_MODULES_IMPORTED_DURING_WEBENGINE_INIT,),
+        name="startup-imports",
+    )
+    thread.start()
+    create_early_profile()
+    thread.join()
+    startup_timing.mark("webengine_initialized")
 
 
 # Dialog manager
@@ -898,6 +939,8 @@ def _run(argv: list[str] | None = None, exec: bool = True) -> AnkiApp | None:
         pm.addon_logs(),
         level=logging.DEBUG if int(os.getenv("ANKIDEV", "0")) else logging.INFO,
     )
+
+    init_webengine_and_import_modules()
 
     # disable icons on mac; this must be done before window created
     if is_mac:

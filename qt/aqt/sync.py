@@ -7,9 +7,9 @@ import functools
 import os
 from collections.abc import Callable
 from concurrent.futures import Future
+from typing import TYPE_CHECKING
 
 import aqt
-import aqt.main
 from anki.errors import Interrupted, SyncError, SyncErrorKind
 from anki.lang import without_unicode_isolation
 from anki.sync import SyncOutput, SyncStatus
@@ -36,6 +36,9 @@ from aqt.utils import (
     tooltip,
     tr,
 )
+
+if TYPE_CHECKING:
+    import aqt.main
 
 
 def get_sync_status(

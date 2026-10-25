@@ -26,7 +26,6 @@ import anki
 import anki.utils
 import aqt
 import aqt.forms
-import aqt.main
 from anki.collection import AddonInfo
 from anki.lang import without_unicode_isolation
 from anki.utils import int_version_to_str
@@ -54,6 +53,7 @@ from aqt.utils import (
 )
 
 if TYPE_CHECKING:
+    import aqt.main
     from anki.httpclient import HttpClient
 
 

@@ -5,11 +5,10 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from concurrent.futures._base import Future
-from typing import Any, Generic, Protocol, TypeVar, Union
+from typing import TYPE_CHECKING, Any, Generic, Protocol, TypeVar, Union
 
 import aqt
 import aqt.gui_hooks
-import aqt.main
 from anki.collection import (
     Collection,
     ImportLogWithChanges,
@@ -23,6 +22,9 @@ from anki.collection import (
 from aqt.errors import show_exception
 from aqt.progress import ProgressUpdate
 from aqt.qt import QWidget
+
+if TYPE_CHECKING:
+    import aqt.main
 
 
 class HasChangesProperty(Protocol):

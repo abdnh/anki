@@ -16,7 +16,6 @@ from typing import TYPE_CHECKING, Any
 
 import anki.lang
 import aqt.forms
-import aqt.sound
 from anki._legacy import deprecated
 from anki.collection import Collection
 from anki.db import DB
@@ -27,12 +26,12 @@ from aqt import appHelpSite, gui_hooks
 from aqt.qt import *
 from aqt.qt import sip
 from aqt.theme import Theme, WidgetStyle, theme_manager
-from aqt.toolbar import HideMode
 from aqt.utils import disable_help_button, send_to_trash, showWarning, tr
 
 if TYPE_CHECKING:
     from aqt.browser.layout import BrowserLayout
     from aqt.editor import EditorMode
+    from aqt.toolbar import HideMode
 
 
 # Profile handling
@@ -573,6 +572,8 @@ create table if not exists profiles
         gui_hooks.body_classes_need_update()
 
     def top_bar_hide_mode(self) -> HideMode:
+        from aqt.toolbar import HideMode
+
         return self.meta.get("top_bar_hide_mode", HideMode.FULLSCREEN)
 
     def set_top_bar_hide_mode(self, mode: HideMode) -> None:
@@ -587,6 +588,8 @@ create table if not exists profiles
         gui_hooks.body_classes_need_update()
 
     def bottom_bar_hide_mode(self) -> HideMode:
+        from aqt.toolbar import HideMode
+
         return self.meta.get("bottom_bar_hide_mode", HideMode.FULLSCREEN)
 
     def set_bottom_bar_hide_mode(self, mode: HideMode) -> None:

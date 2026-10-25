@@ -3,14 +3,16 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import cast
+from typing import TYPE_CHECKING, cast
 
 import aqt
-import aqt.main
 from anki.collection import SearchNode
 from aqt import colors, gui_hooks
 from aqt.theme import ColoredIcon
 from aqt.utils import tr
+
+if TYPE_CHECKING:
+    import aqt.main
 
 
 @dataclass

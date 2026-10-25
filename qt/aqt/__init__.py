@@ -4,6 +4,8 @@
 from __future__ import annotations
 
 # ruff: noqa: F401
+from aqt import startup_timing  # isort:skip
+
 import atexit
 import importlib
 import logging
@@ -753,6 +755,9 @@ def _run(argv: list[str] | None = None, exec: bool = True) -> AnkiApp | None:
     global mw
     global profiler
 
+    startup_timing.mark("aqt_imported")
+    startup_timing.install_hooks()
+
     if argv is None:
         argv = sys.argv
 
@@ -867,6 +872,7 @@ def _run(argv: list[str] | None = None, exec: bool = True) -> AnkiApp | None:
     QCoreApplication.setApplicationName("Anki")
     QGuiApplication.setDesktopFileName("anki")
     app = AnkiApp(argv, safe_mode)
+    startup_timing.mark("app_created")
     if app.secondInstance():
         # we've signaled the primary instance, so we should close
         return None

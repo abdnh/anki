@@ -513,6 +513,7 @@ class AnkiQt(QMainWindow):
         self.setWindowTitle(f"{self.pm.name} - Anki")
         # show and raise window for osx
         self.show()
+        aqt.startup_timing.mark("window_shown")
         self.activateWindow()
         self.raise_()
 
@@ -1887,6 +1888,7 @@ title="{}" {}>{}</button>""".format(
         from aqt.webview import init_webengine
 
         init_webengine()
+        aqt.startup_timing.mark("webengine_initialized")
 
     def setupMediaServer(self) -> None:
         import aqt.mediasrv

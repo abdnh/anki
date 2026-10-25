@@ -210,6 +210,12 @@ in the collection2.log file will also be printed on stdout.
 
 If ANKI_PROFILE_CODE is set, Python profiling data will be written on exit.
 
+If ANKI_STARTUP_TIMING is set, Anki prints when each startup phase finished, in
+milliseconds since the process started, after the deck list is first drawn. This
+also works in normal (non-development) builds. To compare startup times in a
+development build, use `just bench-startup`, which starts Anki many times and
+shows the median of each phase.
+
 ## Installer
 
 Run `tools/build-installer` to build the installer.

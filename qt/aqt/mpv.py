@@ -103,6 +103,7 @@ class MPVBase:
         self.debug = debug
         self._connected = threading.Event()
         self._connect_error = None
+        self._closing = False
 
         self._prepare_socket()
         self._prepare_process()
@@ -413,7 +414,7 @@ class MPVBase:
         except MPVCommandError as e:
             raise MPVCommandError(f"{message['command']!r}: {e}")
         except Exception:
-            if _retry:
+            if _retry and not self._closing:
                 print("mpv timed out, restarting")
                 self._stop_process()
                 return self._send_request(message, timeout, _retry - 1)
@@ -434,6 +435,8 @@ class MPVBase:
 
     def ensure_running(self):
         self._connected.wait()
+        if self._closing:
+            return
         if self._connect_error is not None or not self.is_running():
             self._connect_error = None
             self._stop_thread()
@@ -449,8 +452,14 @@ class MPVBase:
 
     def close(self):
         """Shutdown the mpv process and our communication setup."""
+        # requests from other threads must not start a new process now
+        self._closing = True
         if self.is_running():
-            self._send_request({"command": ["quit"]}, timeout=1)
+            try:
+                self._send_request({"command": ["quit"]}, timeout=1)
+            except Exception:
+                # mpv can exit before it replies
+                pass
             self._stop_process()
         self._stop_thread()
         self._stop_socket()

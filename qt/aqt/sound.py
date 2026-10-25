@@ -505,6 +505,22 @@ class MpvManager(MPV, SoundOrVideoPlayer):
     def shutdown(self) -> None:
         self.close()
 
+    def handle_start_failure(self) -> None:
+        global mpvManager
+
+        print("mpv too old or failed to open, reverting to mplayer")
+        self._stop_process()
+        players = av_player.players
+        index = players.index(self) if self in players else 0
+        players[:] = [
+            p for p in players if p is not self and not isinstance(p, SimpleMpvPlayer)
+        ]
+        players.insert(
+            index, SimpleMplayerSlaveModePlayer(aqt.mw.taskman, self.media_folder)
+        )
+        if mpvManager is self:
+            mpvManager = None
+
     # Legacy, not used
     ##################################################
 
@@ -968,11 +984,9 @@ def setup_audio(taskman: TaskManager, base_folder: str, media_folder: str) -> No
 
         av_player.players.append(WindowsTTSPlayer(taskman))
 
-        if (
-            # If Windows 10, ensure it's October 2018 update or later
-            platform.release() == "10"
-            and int(platform.version().split(".")[-1]) >= 17763
-        ) or platform.release() == "11":
+        # Windows 10 October 2018 update or later. sys.getwindowsversion() avoids
+        # the slow WMI query that platform.release() makes.
+        if sys.platform == "win32" and sys.getwindowsversion().build >= 17763:
             from aqt.tts import WindowsRTTTSFilePlayer
 
             av_player.players.append(WindowsRTTTSFilePlayer(taskman))

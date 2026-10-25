@@ -37,6 +37,7 @@ import sys
 import tempfile
 import threading
 import time
+import traceback
 from queue import Empty, Full, Queue
 from shutil import which
 
@@ -100,18 +101,34 @@ class MPVBase:
     def __init__(self, window_id=None, debug=False):
         self.window_id = window_id
         self.debug = debug
+        self._connected = threading.Event()
+        self._connect_error = None
 
         self._prepare_socket()
         self._prepare_process()
         self._start_process()
-        self._start_socket()
         self._prepare_thread()
-        self._start_thread()
+        self._start_connecting()
 
     def __del__(self):
         self._stop_thread()
         self._stop_process()
         self._stop_socket()
+
+    def _start_connecting(self):
+        """Connect to the new process. Subclasses may do this in the background;
+        requests wait until it is done."""
+        self._connect()
+
+    def _connect(self):
+        try:
+            self._start_socket()
+            self._start_thread()
+        except BaseException as exc:
+            self._connect_error = exc
+            raise
+        finally:
+            self._connected.set()
 
     def _thread_id(self):
         return threading.get_ident()
@@ -177,7 +194,7 @@ class MPVBase:
         start = time.time()
         timeout = 60 if is_mac else 10
         while self.is_running() and time.time() < start + timeout:
-            time.sleep(0.1)
+            time.sleep(0.01)
             if is_win:
                 # named pipe
                 try:
@@ -416,7 +433,9 @@ class MPVBase:
         return self._proc.poll() is None
 
     def ensure_running(self):
-        if not self.is_running():
+        self._connected.wait()
+        if self._connect_error is not None or not self.is_running():
+            self._connect_error = None
             self._stop_thread()
             self._stop_process()
             self._stop_socket()
@@ -464,7 +483,27 @@ class MPV(MPVBase):
 
         super().__init__(*args, **kwargs)
 
-        aqt.mw.taskman.run_in_background(self._register_callbacks, None)
+    def _start_connecting(self):
+        aqt.mw.taskman.run_in_background(
+            self._connect_and_register_callbacks,
+            self._on_connected,
+            uses_collection=False,
+        )
+
+    def _connect_and_register_callbacks(self):
+        self._connect()
+        self._register_callbacks()
+
+    def _on_connected(self, future):
+        try:
+            future.result()
+        except MPVProcessError:
+            self.handle_start_failure()
+        except Exception:
+            traceback.print_exc()
+
+    def handle_start_failure(self):
+        """Called on the main thread if the process could not be connected to."""
 
     def _register_callbacks(self):
         self._callbacks = {}

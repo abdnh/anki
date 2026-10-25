@@ -12,7 +12,16 @@ import pytest
 import aqt
 from anki.sound import SoundOrVideoTag
 from anki.utils import is_lin, is_mac, is_win
-from aqt.sound import MpvManager, _packagedCmd, is_audio_file
+import aqt.sound
+from aqt.sound import (
+    MpvManager,
+    SimpleMplayerPlayer,
+    SimpleMplayerSlaveModePlayer,
+    SimpleMpvPlayer,
+    _packagedCmd,
+    av_player,
+    is_audio_file,
+)
 
 
 def test_is_audio_file_recognizes_common_formats():
@@ -123,3 +132,22 @@ def test_mpvmanager_can_play_generated_wav(
     monkeypatch.setattr(aqt, "mw", mock_mw)
     manager = MpvManager(tmp_path, tmp_path)
     manager.play(SoundOrVideoTag(filename=str(generated_wav.name)), lambda _: None)
+
+
+def test_mpvmanager_start_failure_reverts_to_mplayer(monkeypatch):
+    monkeypatch.setattr(aqt, "mw", MagicMock())
+    monkeypatch.setattr(SimpleMplayerPlayer, "args", list(SimpleMplayerPlayer.args))
+    manager = MpvManager.__new__(MpvManager)
+    manager.media_folder = "media"
+    manager._proc = MagicMock()
+    simple_mpv = SimpleMpvPlayer.__new__(SimpleMpvPlayer)
+    other = MagicMock()
+    monkeypatch.setattr(av_player, "players", [manager, simple_mpv, other])
+    monkeypatch.setattr(aqt.sound, "mpvManager", manager)
+
+    manager.handle_start_failure()
+
+    assert isinstance(av_player.players[0], SimpleMplayerSlaveModePlayer)
+    assert av_player.players[1:] == [other]
+    assert aqt.sound.mpvManager is None
+    manager._proc.terminate.assert_called_once()

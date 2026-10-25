@@ -1,6 +1,10 @@
 // Copyright: Ankitects Pty Ltd and contributors
 // License: GNU AGPL, version 3 or later; http://www.gnu.org/licenses/agpl.html
 
+use std::ffi::c_char;
+use std::ffi::c_void;
+use std::ffi::CStr;
+
 use anki::backend::init_backend;
 use anki::backend::Backend as RustBackend;
 use anki::log::set_global_logger;
@@ -34,6 +38,26 @@ fn syncserver() -> PyResult<()> {
     set_global_logger(None).unwrap();
     let err = SimpleServer::run();
     Err(PyException::new_err(err.to_string()))
+}
+
+extern "C" {
+    fn anki_new_webengine_profile(error: *mut *const c_char) -> *mut c_void;
+}
+
+/// Creates a parentless QWebEngineProfile with the GIL released, and returns
+/// its address for sip.wrapinstance(). See webengine_profile.cpp.
+#[pyfunction]
+fn new_webengine_profile(py: Python) -> PyResult<usize> {
+    let (profile, error) = py.detach(|| {
+        let mut error: *const c_char = std::ptr::null();
+        let profile = unsafe { anki_new_webengine_profile(&mut error) };
+        (profile as usize, error as usize)
+    });
+    if profile == 0 {
+        let error = unsafe { CStr::from_ptr(error as *const c_char) };
+        return Err(PyException::new_err(error.to_string_lossy().into_owned()));
+    }
+    Ok(profile)
 }
 
 #[pyfunction]
@@ -91,6 +115,8 @@ fn _rsbridge(_py: Python, m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_wrapped(wrap_pyfunction!(open_backend)).unwrap();
     m.add_wrapped(wrap_pyfunction!(initialize_logging)).unwrap();
     m.add_wrapped(wrap_pyfunction!(syncserver)).unwrap();
+    m.add_wrapped(wrap_pyfunction!(new_webengine_profile))
+        .unwrap();
 
     Ok(())
 }

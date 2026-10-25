@@ -6,10 +6,12 @@ from __future__ import annotations
 import enum
 import faulthandler
 import gc
+import importlib
 import os
 import re
 import signal
 import sys
+import threading
 import traceback
 import weakref
 from argparse import Namespace
@@ -165,6 +167,20 @@ class MainWebView(AnkiWebView):
             return True
 
         return False
+
+
+# Imported on a background thread while QtWebEngine initializes. They must not
+# create Qt objects at import time.
+_PRELOADED_MODULES = ("aqt.mediasrv", "aqt.deckbrowser", "aqt.overview", "aqt.reviewer")
+
+
+def _preload_modules() -> None:
+    for name in _PRELOADED_MODULES:
+        try:
+            importlib.import_module(name)
+        except Exception:
+            # the main thread imports it again and reports the error
+            pass
 
 
 class AnkiQt(QMainWindow):
@@ -1887,7 +1903,13 @@ title="{}" {}>{}</button>""".format(
     def setup_webengine(self) -> None:
         from aqt.webview import init_webengine
 
+        # The profile is created with the GIL released, so import the modules
+        # that are needed next in the meantime. The thread is joined before the
+        # main thread imports anything else.
+        preload = threading.Thread(target=_preload_modules, name="preload")
+        preload.start()
         init_webengine()
+        preload.join()
         aqt.startup_timing.mark("webengine_initialized")
 
     def setupMediaServer(self) -> None:

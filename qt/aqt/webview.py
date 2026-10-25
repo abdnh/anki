@@ -163,7 +163,7 @@ def _profile_for_kind(kind: AnkiWebViewKind) -> QWebEngineProfile:
         return _profile_without_api_access
 
     # Create a new profile if not cached
-    profile = QWebEngineProfile()
+    profile = _new_profile()
 
     interceptor = AuthInterceptor(profile, api_enabled=have_api_access)
     profile.setUrlRequestInterceptor(interceptor)
@@ -172,6 +172,26 @@ def _profile_for_kind(kind: AnkiWebViewKind) -> QWebEngineProfile:
     else:
         _profile_without_api_access = profile
 
+    return profile
+
+
+def _new_profile() -> QWebEngineProfile:
+    """PyQt holds the GIL while QWebEngineProfile() runs, which takes hundreds of
+    milliseconds the first time. The helper in rsbridge releases it, so that
+    other threads can run meanwhile."""
+    try:
+        from anki._rsbridge import new_webengine_profile
+
+        address = new_webengine_profile()
+    except Exception as exc:
+        print(f"unable to create a web profile with the GIL released: {exc}")
+        return QWebEngineProfile()
+    profile = cast(
+        QWebEngineProfile,
+        sip.wrapinstance(address, cast(sip.wrappertype, QWebEngineProfile)),
+    )
+    # owned by Python, as when it is created with QWebEngineProfile()
+    sip.transferback(cast(sip.wrapper, profile))
     return profile
 
 

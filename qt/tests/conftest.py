@@ -11,4 +11,5 @@ def qapp():
     os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
     from aqt.qt import QApplication
 
-    return QApplication.instance() or QApplication([])
+    # QtWebEngine needs argv[0]
+    return QApplication.instance() or QApplication(["anki-tests"])

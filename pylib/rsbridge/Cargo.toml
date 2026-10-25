@@ -18,6 +18,9 @@ test = false
 anki.workspace = true
 pyo3.workspace = true
 
+[build-dependencies]
+cc.workspace = true
+
 [features]
 rustls = ["anki/rustls"]
 native-tls = ["anki/native-tls"]

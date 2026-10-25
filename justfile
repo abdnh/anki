@@ -26,6 +26,10 @@ web-watch:
 rebuild-web:
     ./tools/rebuild-web
 
+# Benchmark startup time; see `just bench-startup --help`
+bench-startup *args: build
+    {{ pyenv_python }} tools/startup_bench.py {{ args }}
+
 # Build wheels (needed for some platforms)
 wheels:
     {{ ninja }} wheels
@@ -186,6 +190,7 @@ docs-release:
 
 ninja := if os() == "windows" { "tools\\ninja" } else { "./ninja" }
 run_script := if os() == "windows" { ".\\run.bat" } else { "./run" }
+pyenv_python := if os() == "windows" { "out\\pyenv\\Scripts\\python" } else { "out/pyenv/bin/python" }
 playwright_env := if os() == "windows" { "set PLAYWRIGHT_BROWSERS_PATH=out\\playwright-browsers&&" } else { "PLAYWRIGHT_BROWSERS_PATH=out/playwright-browsers" }
 yarn := if os() == "windows" { "out\\extracted\\node\\yarn.cmd" } else { "out/extracted/node/bin/yarn" }
 uv := env("UV_BINARY", if os() == "windows" { "out\\extracted\\uv\\uv" } else { "out/extracted/uv/uv" })

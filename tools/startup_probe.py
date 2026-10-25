@@ -63,6 +63,7 @@ MAIN_WINDOW_METHODS = (
     "setup_crashlog",
     "setupKeys",
     "setupThreads",
+    "setup_webengine",
     "setupMediaServer",
     "setupSpellCheck",
     "setupProgress",
@@ -228,27 +229,31 @@ def install_aqt_patches() -> None:
 
     aqt.main.AnkiQt.__init__ = mw_init  # type: ignore[method-assign]
 
-    _wrap_profile_creation(aqt.webview.AnkiWebPage)
+    _wrap_profile_creation(aqt.webview)
     _wrap_webview(aqt.webview.AnkiWebView)
 
 
-def _wrap_profile_creation(page_class: Any) -> None:
-    orig = getattr(page_class, "_profileForPage", None)
+def _wrap_profile_creation(webview: Any) -> None:
+    owner, attr = webview, "_profile_for_kind"
+    if not hasattr(owner, attr):
+        # older versions
+        owner, attr = webview.AnkiWebPage, "_profileForPage"
+    orig = getattr(owner, attr, None)
     if orig is None:
         return
 
     @functools.wraps(orig)
-    def wrapper(self: Any, *args: Any, **kwargs: Any) -> Any:
+    def wrapper(*args: Any, **kwargs: Any) -> Any:
         start = time.perf_counter()
         try:
-            return orig(self, *args, **kwargs)
+            return orig(*args, **kwargs)
         finally:
             end = time.perf_counter()
             # Cached lookups take microseconds; only creation is of interest.
             if end - start > 0.001:
                 REC.span("QWebEngineProfile()", start, end)
 
-    page_class._profileForPage = wrapper
+    setattr(owner, attr, wrapper)
 
 
 def _wrap_media_server(mediasrv: Any) -> None:

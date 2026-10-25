@@ -141,6 +141,47 @@ _profile_with_api_access: QWebEngineProfile | None = None
 _profile_without_api_access: QWebEngineProfile | None = None
 
 
+def _profile_for_kind(kind: AnkiWebViewKind) -> QWebEngineProfile:
+    have_api_access = kind in (
+        AnkiWebViewKind.DECK_OPTIONS,
+        AnkiWebViewKind.EDITOR,
+        AnkiWebViewKind.DECK_STATS,
+        AnkiWebViewKind.CHANGE_NOTETYPE,
+        AnkiWebViewKind.BROWSER_CARD_INFO,
+        AnkiWebViewKind.IMPORT_ANKI_PACKAGE,
+        AnkiWebViewKind.IMPORT_CSV,
+        AnkiWebViewKind.IMPORT_LOG,
+        AnkiWebViewKind.PREFERENCES,
+    )
+
+    global _profile_with_api_access, _profile_without_api_access
+
+    # Use cached profile if available
+    if have_api_access and _profile_with_api_access is not None:
+        return _profile_with_api_access
+    elif not have_api_access and _profile_without_api_access is not None:
+        return _profile_without_api_access
+
+    # Create a new profile if not cached
+    profile = QWebEngineProfile()
+
+    interceptor = AuthInterceptor(profile, api_enabled=have_api_access)
+    profile.setUrlRequestInterceptor(interceptor)
+    if have_api_access:
+        _profile_with_api_access = profile
+    else:
+        _profile_without_api_access = profile
+
+    return profile
+
+
+def init_webengine() -> None:
+    """QtWebEngine's first profile takes hundreds of milliseconds to create, and
+    more initialization continues in the background after that. Call this early
+    in startup, so that the background work overlaps with other startup work."""
+    _profile_for_kind(AnkiWebViewKind.MAIN)
+
+
 class AnkiWebPage(QWebEnginePage):
     def __init__(
         self,
@@ -157,37 +198,7 @@ class AnkiWebPage(QWebEnginePage):
         self.open_links_externally = True
 
     def _profileForPage(self, kind: AnkiWebViewKind) -> QWebEngineProfile:
-        have_api_access = kind in (
-            AnkiWebViewKind.DECK_OPTIONS,
-            AnkiWebViewKind.EDITOR,
-            AnkiWebViewKind.DECK_STATS,
-            AnkiWebViewKind.CHANGE_NOTETYPE,
-            AnkiWebViewKind.BROWSER_CARD_INFO,
-            AnkiWebViewKind.IMPORT_ANKI_PACKAGE,
-            AnkiWebViewKind.IMPORT_CSV,
-            AnkiWebViewKind.IMPORT_LOG,
-            AnkiWebViewKind.PREFERENCES,
-        )
-
-        global _profile_with_api_access, _profile_without_api_access
-
-        # Use cached profile if available
-        if have_api_access and _profile_with_api_access is not None:
-            return _profile_with_api_access
-        elif not have_api_access and _profile_without_api_access is not None:
-            return _profile_without_api_access
-
-        # Create a new profile if not cached
-        profile = QWebEngineProfile()
-
-        interceptor = AuthInterceptor(profile, api_enabled=have_api_access)
-        profile.setUrlRequestInterceptor(interceptor)
-        if have_api_access:
-            _profile_with_api_access = profile
-        else:
-            _profile_without_api_access = profile
-
-        return profile
+        return _profile_for_kind(kind)
 
     def _setupBridge(self) -> None:
         # Add-on compatibility: For existing add-on callers that override the init

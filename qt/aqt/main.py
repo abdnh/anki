@@ -227,6 +227,7 @@ class AnkiQt(QMainWindow):
         self.setupAppMsg()
         self.setupKeys()
         self.setupThreads()
+        self.setup_webengine()
         self.setupMediaServer()
         self.setupSpellCheck()
         self.setupProgress()
@@ -1881,6 +1882,11 @@ title="{}" {}>{}</button>""".format(
 
     # Media server
     ##########################################################################
+
+    def setup_webengine(self) -> None:
+        from aqt.webview import init_webengine
+
+        init_webengine()
 
     def setupMediaServer(self) -> None:
         import aqt.mediasrv

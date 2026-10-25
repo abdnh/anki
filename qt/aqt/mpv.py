@@ -506,10 +506,14 @@ class MPV(MPVBase):
     def _on_connected(self, future):
         try:
             future.result()
-        except MPVProcessError:
-            self.handle_start_failure()
-        except Exception:
-            traceback.print_exc()
+        except Exception as exc:
+            if self._closing:
+                # requests fail once close() has started
+                return
+            if isinstance(exc, MPVProcessError):
+                self.handle_start_failure()
+            else:
+                traceback.print_exc()
 
     def handle_start_failure(self):
         """Called on the main thread if the process could not be connected to."""

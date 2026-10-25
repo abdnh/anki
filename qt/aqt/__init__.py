@@ -5,6 +5,7 @@ from __future__ import annotations
 
 # ruff: noqa: F401
 import atexit
+import importlib
 import logging
 import os
 import sys
@@ -86,7 +87,9 @@ from aqt.qt import sip
 from aqt.utils import TR, tr
 
 if TYPE_CHECKING:
+    import aqt.filtered_deck
     import aqt.profiles
+    import aqt.stats
 
 # compat aliases
 anki.version = _version  # type: ignore
@@ -119,6 +122,26 @@ mw: AnkiQt = None  # type: ignore # set on init
 
 import aqt.forms
 
+# Submodules that 'import aqt' used to import as a side effect. They are now
+# imported on first use, for add-ons that use them without importing them.
+_LAZY_SUBMODULES = frozenset(
+    (
+        "about addcards addcards_legacy ankihub browser changenotetype clayout "
+        "deckchooser deckconf deckoptions editcurrent editcurrent_legacy editor "
+        "editor_legacy fields filtered_deck import_export models notetypechooser "
+        "preferences previewer reviewer schema_change_tracker sidebar stats switch "
+        "url_schemes"
+    ).split()
+)
+
+if not TYPE_CHECKING:
+
+    def __getattr__(name: str) -> Any:
+        if name in _LAZY_SUBMODULES:
+            return importlib.import_module(f"aqt.{name}")
+        raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+
+
 # Dialog manager
 ##########################################################################
 # ensures only one copy of the window is open at once, and provides
@@ -135,27 +158,65 @@ import aqt.forms
 # - make preferences modal? cmd+q does wrong thing
 
 
-from aqt import addcards, addons, browser, editcurrent, filtered_deck  # isort:skip
-from aqt import stats, about, preferences, mediasync  # isort:skip
+class _LazyDialogCreator:
+    """Imports a dialog's module on first use, so that startup does not import
+    every dialog."""
+
+    def __init__(self, module: str, name: str) -> None:
+        self.module = module
+        self.name = name
+
+    def resolve(self) -> Callable:
+        return getattr(importlib.import_module(self.module), self.name)
+
+    def __call__(self, *args: Any, **kwargs: Any) -> Any:
+        return self.resolve()(*args, **kwargs)
+
+
+class _DialogRegistry(dict[str, list]):
+    """Maps a dialog name to [creator, instance]. Reading an entry with [] replaces
+    a lazy creator with the real one, so add-ons that read or replace
+    _dialogs[name][0] continue to work."""
+
+    def __getitem__(self, name: str) -> list:
+        entry = super().__getitem__(name)
+        if isinstance(entry[0], _LazyDialogCreator):
+            entry[0] = entry[0].resolve()
+        return entry
+
+
+_BUILTIN_DIALOGS = {
+    "AddCards": ("aqt.addcards", "AddCards"),
+    "NewAddCards": ("aqt.addcards", "NewAddCards"),
+    "AddonsDialog": ("aqt.addons", "AddonsDialog"),
+    "Browser": ("aqt.browser", "Browser"),
+    "EditCurrent": ("aqt.editcurrent", "EditCurrent"),
+    "NewEditCurrent": ("aqt.editcurrent", "NewEditCurrent"),
+    "FilteredDeckConfigDialog": ("aqt.filtered_deck", "FilteredDeckConfigDialog"),
+    "DeckStats": ("aqt.stats", "DeckStats"),
+    "NewDeckStats": ("aqt.stats", "NewDeckStats"),
+    "About": ("aqt.about", "show"),
+    "Preferences": ("aqt.preferences", "Preferences"),
+    "sync_log": ("aqt.mediasync", "MediaSyncDialog"),
+}
 
 
 class DialogManager:
-    _dialogs: dict[str, list] = {
-        "AddCards": [addcards.AddCards, None],
-        "NewAddCards": [addcards.NewAddCards, None],
-        "AddonsDialog": [addons.AddonsDialog, None],
-        "Browser": [browser.Browser, None],
-        "EditCurrent": [editcurrent.EditCurrent, None],
-        "NewEditCurrent": [editcurrent.NewEditCurrent, None],
-        "FilteredDeckConfigDialog": [filtered_deck.FilteredDeckConfigDialog, None],
-        "DeckStats": [stats.DeckStats, None],
-        "NewDeckStats": [stats.NewDeckStats, None],
-        "About": [about.show, None],
-        "Preferences": [preferences.Preferences, None],
-        "sync_log": [mediasync.MediaSyncDialog, None],
-    }
-    _classes = set(filter(isclass, (v[0] for _, v in _dialogs.items())))
+    _dialogs: dict[str, list] = _DialogRegistry(
+        (name, [_LazyDialogCreator(module, attr), None])
+        for name, (module, attr) in _BUILTIN_DIALOGS.items()
+    )
     _activeWindow = None
+
+    @property
+    def _classes(self) -> set[type]:
+        classes = set()
+        for name in _BUILTIN_DIALOGS:
+            creator = dict.__getitem__(self._dialogs, name)[0]
+            # a dialog whose module was not imported cannot be open
+            if isclass(creator):
+                classes.add(creator)
+        return classes
 
     def open(self, name: str, *args: Any, **kwargs: Any) -> Any:
         (creator, instance) = self._dialogs[name]
@@ -190,7 +251,7 @@ class DialogManager:
             return self._activeWindow
 
     def getInstance(self, name: str):
-        if not (res := self._dialogs.get(name)):
+        if not (res := dict.get(self._dialogs, name)):
             return
         (_, instance) = res
         return instance

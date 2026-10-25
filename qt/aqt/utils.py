@@ -14,8 +14,6 @@ from functools import partial, wraps
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal, Union
 
-from send2trash import send2trash
-
 import aqt
 from anki._legacy import DeprecatedNamesMixinForModule
 from anki.collection import Collection, HelpPage
@@ -1037,6 +1035,8 @@ def send_to_trash(path: Path) -> None:
     if not path.exists():
         return
     try:
+        from send2trash import send2trash
+
         send2trash(path)
     except Exception as exc:
         # Linux users may not have a trash folder set up
@@ -1391,4 +1391,9 @@ _deprecated_names = DeprecatedNamesMixinForModule(globals())
 if not TYPE_CHECKING:
 
     def __getattr__(name: str) -> Any:
+        if name == "send2trash":
+            # slow to import, so only imported when used
+            from send2trash import send2trash
+
+            return send2trash
         return _deprecated_names.__getattr__(name)

@@ -19,8 +19,6 @@ from operator import itemgetter
 from pathlib import Path
 from typing import Any, cast
 
-from markdown import markdown
-
 import aqt
 import aqt.mpv
 import aqt.qt
@@ -885,6 +883,8 @@ def record_audio(
         _diag = RecordDialog(parent, mw, after_record)
     except Exception as e:
         err_str = str(e)
+        from markdown import markdown
+
         showWarning(markdown(tr.qt_misc_unable_to_record(error=err_str)))
 
 

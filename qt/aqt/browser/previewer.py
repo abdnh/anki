@@ -25,7 +25,6 @@ from aqt.qt import (
     QVBoxLayout,
     qconnect,
 )
-from aqt.reviewer import replay_audio
 from aqt.sound import av_player, play_clicked_audio
 from aqt.theme import theme_manager
 from aqt.utils import disable_help_button, restoreGeom, saveGeom, setWindowIcon, tr
@@ -122,6 +121,9 @@ class Previewer(QDialog):
         self._on_close()
 
     def _on_replay_audio(self) -> None:
+        # aqt.reviewer imports aqt.browser, so it cannot be imported at the top
+        from aqt.reviewer import replay_audio
+
         assert self._web is not None
         card = self.card()
         assert card is not None

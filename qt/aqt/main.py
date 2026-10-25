@@ -23,6 +23,7 @@ import aqt
 import aqt.forms
 import aqt.progress
 import aqt.sound
+import aqt.webview_shell
 from anki import hooks
 from anki._backend import RustBackend as _RustBackend
 from anki._legacy import deprecated
@@ -611,6 +612,8 @@ class AnkiQt(QMainWindow):
         self.toolbarWeb.cleanup()
         self.web.cleanup()
         self.bottomWeb.cleanup()
+        if self.shellWeb:
+            self.shellWeb.cleanup()
         self.deleteLater()
         app = self.app
         app._unset_windows_shutdown_block_reason()
@@ -961,22 +964,28 @@ title="{}" {}>{}</button>""".format(
         # main window
         self.form = aqt.forms.main.Ui_MainWindow()
         self.form.setupUi(self)
-        # toolbar
-        tweb = self.toolbarWeb = TopWebView(self)
-        self.toolbar = Toolbar(self, tweb)
-        # main area
-        self.web = MainWebView(self)
-        # bottom area
-        sweb = self.bottomWeb = BottomWebView(self)
-        sweb.setFocusPolicy(Qt.FocusPolicy.WheelFocus)
-        sweb.disable_zoom()
-        # add in a layout
         self.mainLayout = QVBoxLayout()
         self.mainLayout.setContentsMargins(0, 0, 0, 0)
         self.mainLayout.setSpacing(0)
-        self.mainLayout.addWidget(tweb)
-        self.mainLayout.addWidget(self.web)
-        self.mainLayout.addWidget(sweb)
+        if aqt.webview_shell.enabled(self.pm):
+            # experimental: one web view with the three areas in frames
+            self.shellWeb, tweb, self.web, sweb = aqt.webview_shell.setup_views(
+                self, TopWebView, MainWebView, BottomWebView
+            )
+            self.toolbarWeb = tweb
+            self.bottomWeb = sweb
+            self.mainLayout.addWidget(self.shellWeb)
+        else:
+            self.shellWeb = None
+            tweb = self.toolbarWeb = TopWebView(self)
+            self.web = MainWebView(self)
+            sweb = self.bottomWeb = BottomWebView(self)
+            self.mainLayout.addWidget(tweb)
+            self.mainLayout.addWidget(self.web)
+            self.mainLayout.addWidget(sweb)
+        self.toolbar = Toolbar(self, tweb)
+        sweb.setFocusPolicy(Qt.FocusPolicy.WheelFocus)
+        sweb.disable_zoom()
         self.form.centralwidget.setLayout(self.mainLayout)
 
         # force webengine processes to load before cwd is changed

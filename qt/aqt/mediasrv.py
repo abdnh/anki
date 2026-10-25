@@ -195,6 +195,11 @@ class MediaServer:
         if self._server:
             self._server.set_web_exports(addon, pattern)
 
+    def allow_framing_once(self, token: str) -> None:
+        """Let the next request for a trusted page with ankiShellFrame=<token> in
+        its query be framed by a same-origin page (aqt.webview_shell)."""
+        self._server.allow_framing_once(token)
+
     def shutdown(self) -> None:
         self.is_shutdown = True
         if self._server:

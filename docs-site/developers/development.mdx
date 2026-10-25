@@ -216,6 +216,13 @@ also works in normal (non-development) builds. To compare startup times in a
 development build, use `just bench-startup`, which starts Anki many times and
 shows the median of each phase.
 
+If ANKI_SINGLE_WEBVIEW is set to 1, the main window uses one web view instead of
+three (an experiment, also enabled by setting `singleWebview` to true in the
+profile manager's global settings). The top bar, main area and bottom bar are
+then frames in one page, which saves a renderer process. `mw.web`,
+`mw.toolbarWeb` and `mw.bottomWeb` keep working, but their `page()` only
+supports `runJavaScript()`. See `qt/aqt/webview_shell.py`.
+
 ## Installer
 
 Run `tools/build-installer` to build the installer.

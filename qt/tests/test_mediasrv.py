@@ -410,6 +410,37 @@ class TestBundledFiles:
         assert data != b"outside"
 
 
+class TestFramingTokens:
+    """The single web view mode (aqt.webview_shell) frames trusted pages that it
+    loads by URL. Only a one-time token from Python may allow that."""
+
+    def test_token_allows_same_origin_framing_once(self, server: Server) -> None:
+        server.server.allow_framing_once("tok")
+
+        first = server.fetch("/deck-options/1?ankiShellFrame=tok")[1]
+        second = server.fetch("/deck-options/1?ankiShellFrame=tok")[1]
+
+        assert first["content-security-policy"] == "frame-ancestors 'self'"
+        assert second["content-security-policy"] == TRUSTED_PAGE_CSP
+
+    def test_unknown_token_does_not_allow_framing(self, server: Server) -> None:
+        server.server.allow_framing_once("tok")
+
+        _, headers, _ = server.fetch("/_anki/pages/page.html?ankiShellFrame=other")
+
+        assert headers["content-security-policy"] == TRUSTED_PAGE_CSP
+
+    def test_token_never_relaxes_pages_with_user_content(self, server: Server) -> None:
+        server.server.allow_framing_once("tok")
+
+        _, headers, _ = server.fetch("/editor/?ankiShellFrame=tok")
+
+        assert (
+            _csp_directives(headers["content-security-policy"])["frame-ancestors"]
+            == "'none'"
+        )
+
+
 class TestLegacyPages:
     @pytest.mark.parametrize(
         "context", [PageContext.REVIEWER, PageContext.PREVIEWER, PageContext.UNKNOWN]

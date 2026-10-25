@@ -6,6 +6,7 @@
 //! the GIL. Other requests (mainly the /_anki/ API) are passed to Python.
 
 use std::collections::HashMap;
+use std::collections::HashSet;
 use std::net::TcpListener as StdTcpListener;
 use std::path::Component;
 use std::path::Path;
@@ -13,6 +14,7 @@ use std::path::PathBuf;
 use std::sync::atomic::AtomicBool;
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
+use std::sync::Mutex;
 use std::sync::RwLock;
 use std::thread::JoinHandle;
 
@@ -90,7 +92,13 @@ struct Shared {
     python: Py<PyAny>,
     filter_media_paths: AtomicBool,
     python_routes: AtomicBool,
+    /// One-time tokens that let a trusted page be framed by the main window's
+    /// shell page (aqt.webview_shell).
+    framing_tokens: Mutex<HashSet<String>>,
 }
+
+/// The query key of a framing token.
+const FRAMING_QUERY_KEY: &str = "ankiShellFrame";
 
 #[pyclass(module = "_rsbridge")]
 pub(crate) struct MediaServer {
@@ -134,6 +142,7 @@ impl MediaServer {
             python,
             filter_media_paths: AtomicBool::new(false),
             python_routes: AtomicBool::new(false),
+            framing_tokens: Default::default(),
         });
         let (shutdown_tx, shutdown_rx) = oneshot::channel::<()>();
         let state = shared.clone();
@@ -214,6 +223,12 @@ impl MediaServer {
         }
     }
 
+    /// The next request for a trusted page with this token in its query may
+    /// be framed by a same-origin page.
+    fn allow_framing_once(&self, token: String) {
+        self.shared.framing_tokens.lock().unwrap().insert(token);
+    }
+
     fn set_page(&self, id: u64, html: String, context: u8) {
         self.shared
             .pages
@@ -280,7 +295,7 @@ async fn handle(State(shared): State<Arc<Shared>>, request: Request) -> Response
     let query = parts.uri.query().unwrap_or_default().to_string();
 
     match route(&shared, &parts.method, &path) {
-        Route::Bundled { path, sveltekit } => serve_bundled(&shared, &path, sveltekit),
+        Route::Bundled { path, sveltekit } => serve_bundled(&shared, &path, sveltekit, &query),
         Route::LegacyPage => serve_legacy_page(&shared, &query),
         Route::Python => {
             let body = axum::body::to_bytes(body, usize::MAX)
@@ -559,7 +574,25 @@ fn safe_join(base: &Path, path: &str) -> Option<PathBuf> {
     (parts > 0).then_some(full)
 }
 
-fn serve_bundled(shared: &Shared, path: &str, sveltekit: Option<&str>) -> Response {
+fn query_value<'a>(query: &'a str, key: &str) -> Option<&'a str> {
+    query
+        .split('&')
+        .filter_map(|pair| pair.split_once('='))
+        .find(|(k, _)| *k == key)
+        .map(|(_, value)| value)
+}
+
+/// The CSP of a trusted page, which only a page with a framing token may frame.
+fn trusted_page_csp(shared: &Shared, csp: &Csp, query: &str) -> String {
+    if let Some(token) = query_value(query, FRAMING_QUERY_KEY) {
+        if shared.framing_tokens.lock().unwrap().remove(token) {
+            return "frame-ancestors 'self'".to_string();
+        }
+    }
+    csp.trusted_page.clone()
+}
+
+fn serve_bundled(shared: &Shared, path: &str, sveltekit: Option<&str>, query: &str) -> Response {
     let immutable = path.contains("immutable");
     let path = if path.starts_with("sveltekit/") && !immutable {
         "sveltekit/index.html"
@@ -596,10 +629,10 @@ fn serve_bundled(shared: &Shared, path: &str, sveltekit: Option<&str>) -> Respon
                     )
                 }
             }
-            csp_header = Some(csp.trusted_page.clone());
+            csp_header = Some(trusted_page_csp(shared, &csp, query));
         }
     } else if mime == "text/html" {
-        csp_header = Some(csp.trusted_page.clone());
+        csp_header = Some(trusted_page_csp(shared, &csp, query));
     }
 
     let mut response = Response::new(Body::from(data));
@@ -650,11 +683,7 @@ fn strip_csp_meta(html: &[u8]) -> Option<Vec<u8>> {
 }
 
 fn serve_legacy_page(shared: &Shared, query: &str) -> Response {
-    let id = query
-        .split('&')
-        .filter_map(|pair| pair.split_once('='))
-        .find(|(key, _)| *key == "id")
-        .and_then(|(_, value)| value.parse::<u64>().ok());
+    let id = query_value(query, "id").and_then(|value| value.parse::<u64>().ok());
     let pages = shared.pages.read().unwrap();
     let Some(page) = id.and_then(|id| pages.get(&id)) else {
         return text_response(StatusCode::NOT_FOUND, "page not found");

@@ -35,6 +35,31 @@ ENV_CPROFILE = "ANKI_STARTUP_BENCH_CPROFILE"
 ENV_MODE = "ANKI_STARTUP_BENCH_MODE"
 
 PAINTED_CMD = "startup-bench:painted"
+# Also reports browser-side times of the deck list page, in ms since the epoch.
+PAINTED_JS = (
+    """
+(() => {
+  const now = () => performance.timeOrigin + performance.now();
+  const times = {eval_run: now()};
+  const nav = performance.getEntriesByType("navigation")[0];
+  if (nav) {
+    times.response_end = performance.timeOrigin + nav.responseEnd;
+    times.dom_content_loaded = performance.timeOrigin + nav.domContentLoadedEventEnd;
+  }
+  requestAnimationFrame(() => {
+    times.first_frame = now();
+    requestAnimationFrame(() => {
+      times.second_frame = now();
+      for (const entry of performance.getEntriesByType("paint")) {
+        times[entry.name] = performance.timeOrigin + entry.startTime;
+      }
+      pycmd("%s:" + JSON.stringify(times));
+    });
+  });
+})();
+"""
+    % PAINTED_CMD
+)
 
 # Module imports to time. Extension modules are timed from create_module().
 WATCHED_IMPORTS = (
@@ -378,15 +403,13 @@ def install_hooks() -> None:
         REC.mark("deck_browser_did_render")
         # Two frames: the second callback runs once the frame that holds
         # the deck list has been committed.
-        deck_browser.web.eval(
-            "requestAnimationFrame(() => requestAnimationFrame(() =>"
-            f" pycmd({json.dumps(PAINTED_CMD)})));"
-        )
+        deck_browser.web.eval(PAINTED_JS)
 
     def on_js_message(handled: tuple[bool, Any], message: str, context: Any) -> Any:
-        if message != PAINTED_CMD:
+        if not message.startswith(PAINTED_CMD):
             return handled
         REC.mark("deck_browser_painted")
+        _record_js_times(message[len(PAINTED_CMD) + 1 :])
         from aqt.qt import QTimer
 
         QTimer.singleShot(0, _on_event_loop_idle)
@@ -406,6 +429,18 @@ def install_hooks() -> None:
             on_js_message,
         ]
     )
+
+
+def _record_js_times(payload: str) -> None:
+    try:
+        times = json.loads(payload)
+    except ValueError:
+        return
+    # epoch ms -> perf_counter seconds
+    offset = time.time() - time.perf_counter()
+    for name, epoch_ms in times.items():
+        if isinstance(epoch_ms, (int, float)):
+            REC.mark(f"js:{name}", epoch_ms / 1000 - offset)
 
 
 def _disable_network_checks() -> None:

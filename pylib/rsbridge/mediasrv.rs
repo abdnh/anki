@@ -471,7 +471,7 @@ fn header_str(headers: &HeaderMap, name: header::HeaderName) -> &str {
 fn text_response(status: StatusCode, text: &str) -> Response {
     Response::builder()
         .status(status)
-        .header(header::CONTENT_TYPE, "text/plain")
+        .header(header::CONTENT_TYPE, "text/plain; charset=utf-8")
         .body(Body::from(text.to_string()))
         .unwrap()
 }
@@ -523,6 +523,22 @@ fn mime_for_path(path: &str) -> String {
         }
     };
     mime.to_string()
+}
+
+/// Adds a charset to textual types, as Flask did. Without it, Chromium guesses
+/// the encoding of non-ASCII pages.
+fn content_type(mime: &str) -> String {
+    let textual = mime.starts_with("text/")
+        || mime.ends_with("+xml")
+        || matches!(
+            mime,
+            "application/javascript" | "application/ecmascript" | "application/xml"
+        );
+    if textual {
+        format!("{mime}; charset=utf-8")
+    } else {
+        mime.to_string()
+    }
 }
 
 /// Joins a relative path to a base folder, refusing anything that could
@@ -587,7 +603,7 @@ fn serve_bundled(shared: &Shared, path: &str, sveltekit: Option<&str>) -> Respon
     }
 
     let mut response = Response::new(Body::from(data));
-    set_header(&mut response, header::CONTENT_TYPE, &mime);
+    set_header(&mut response, header::CONTENT_TYPE, &content_type(&mime));
     if immutable {
         set_header(&mut response, header::CACHE_CONTROL, "max-age=31536000");
     }
@@ -645,7 +661,11 @@ fn serve_legacy_page(shared: &Shared, query: &str) -> Response {
     };
     let csp = shared.csp.read().unwrap();
     let mut response = Response::new(Body::from(page.html.clone()));
-    set_header(&mut response, header::CONTENT_TYPE, "text/html");
+    set_header(
+        &mut response,
+        header::CONTENT_TYPE,
+        "text/html; charset=utf-8",
+    );
     // JS in field content must not run in the editor, as it would have access
     // to our internal API
     let policy = if page.context == PAGE_CONTEXT_EDITOR {
@@ -731,7 +751,7 @@ async fn serve_local_file(
         Ok(response) => response.map(Body::new),
         Err(err) => return text_response(StatusCode::INTERNAL_SERVER_ERROR, &err.to_string()),
     };
-    set_header(&mut response, header::CONTENT_TYPE, &mime);
+    set_header(&mut response, header::CONTENT_TYPE, &content_type(&mime));
     let max_age = if path.ends_with(".css") {
         // caching css prevents flicker in the webview, but keep it short
         "max-age=10"

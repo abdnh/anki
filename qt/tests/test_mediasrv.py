@@ -358,7 +358,7 @@ class TestBundledFiles:
         status, headers, _ = server.fetch("/_anki/js/foo.js")
 
         assert status == 200
-        assert headers["content-type"] == "application/javascript"
+        assert headers["content-type"] == "application/javascript; charset=utf-8"
         assert "content-security-policy" not in headers
 
     def test_bundled_html_page_refuses_framing(self, server: Server) -> None:
@@ -421,6 +421,15 @@ class TestLegacyPages:
 
         assert (status, data) == (200, b"<html>page</html>")
         assert headers["content-security-policy"] == TRUSTED_PAGE_CSP
+
+    def test_legacy_page_is_utf8(self, server: Server) -> None:
+        html = "<html>⁨studied⁩</html>"
+        server.server.set_page(1, html, int(PageContext.REVIEWER))
+
+        _, headers, data = server.fetch("/_anki/legacyPageData?id=1")
+
+        assert headers["content-type"] == "text/html; charset=utf-8"
+        assert data.decode("utf-8") == html
 
     def test_legacy_editor_page_gets_editor_csp(self, server: Server) -> None:
         server.server.set_page(1, "<html></html>", int(PageContext.EDITOR))

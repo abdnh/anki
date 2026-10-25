@@ -295,7 +295,7 @@ def _text_response(code: HTTPStatus, text: str) -> Response:
 
     Response is returned as text/plain, so no escaping of untrusted
     input is required."""
-    return Response(text, code, {"Content-Type": "text/plain"})
+    return Response(text, code, {"Content-Type": "text/plain; charset=utf-8"})
 
 
 DynamicRequest = Callable[[], Response]

@@ -3779,8 +3779,14 @@ name = "rsbridge"
 version = "0.0.0"
 dependencies = [
  "anki",
+ "axum",
  "cc",
+ "mime_guess",
+ "percent-encoding",
  "pyo3",
+ "regex",
+ "tokio",
+ "tower-http",
 ]
 
 [[package]]

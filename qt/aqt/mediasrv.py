@@ -1,33 +1,34 @@
 # Copyright: Ankitects Pty Ltd and contributors
 # License: GNU AGPL, version 3 or later; http://www.gnu.org/licenses/agpl.html
 
+"""The HTTP server for Anki's web views.
+
+The server itself is in rsbridge (mediasrv.rs). It serves bundled files, add-on
+web exports, collection media and legacy page HTML without the GIL, and passes
+other requests (mainly the /_anki/ API below) to _PythonHandler.
+"""
+
 from __future__ import annotations
 
 import asyncio
 import enum
+import inspect
 import logging
-import mimetypes
 import os
 import re
 import secrets
-import sys
 import threading
 import traceback
+import urllib.parse
 from collections.abc import Callable
-from dataclasses import dataclass
-from errno import EPROTOTYPE
+from dataclasses import dataclass, field
 from http import HTTPStatus
 from pathlib import Path
-from typing import Any, Generic, cast
+from typing import TYPE_CHECKING, Any, Generic, cast
 
-import flask
 import stringcase
-import waitress.wasyncore
-from flask import Response, abort, request
-from waitress.server import create_server
 
 import aqt
-import aqt.main
 import aqt.operations
 from anki import frontend_pb2, generic_pb2, hooks
 from anki.collection import (
@@ -39,7 +40,7 @@ from anki.collection import (
 )
 from anki.decks import UpdateDeckConfigs, UpdateDeckConfigsMode
 from anki.scheduler.v3 import SchedulingStatesWithContext, SetSchedulingStatesRequest
-from anki.utils import dev_mode, from_json_bytes, to_json_bytes
+from anki.utils import from_json_bytes, to_json_bytes
 from aqt.changenotetype import ChangeNotetypeDialog
 from aqt.deckoptions import DeckOptionsDialog
 from aqt.operations import on_op_finished
@@ -55,21 +56,10 @@ from aqt.utils import (
     tr,
 )
 
-# https://forums.ankiweb.net/t/anki-crash-when-using-a-specific-deck/22266
-waitress.wasyncore._DISCONNECTED = waitress.wasyncore._DISCONNECTED.union({EPROTOTYPE})  # type: ignore
+if TYPE_CHECKING:
+    import aqt.main
 
 logger = logging.getLogger(__name__)
-app = flask.Flask(__name__, root_path="/fake")
-
-
-@dataclass
-class LocalFileRequest:
-    # base folder, eg media folder
-    root: str
-    # path to file relative to root folder
-    path: str
-    # collection media is untrusted user content; add-on web exports are not
-    untrusted: bool = True
 
 
 UNTRUSTED_MEDIA_CSP = "; ".join(
@@ -123,28 +113,6 @@ def _legacy_editor_content_security_policy(port: int) -> str:
     return _untrusted_page_content_security_policy(" ".join(csp_paths))
 
 
-_SVELTEKIT_CSP_META_RE = re.compile(
-    rb"<meta http-equiv=\"content-security-policy\" content=\"script-src 'self' ('sha256-[A-Za-z0-9+/=]+')\">"
-)
-
-
-def _sveltekit_render_script_hash(html: bytes) -> str | None:
-    """Extract the hash SvelteKit computed for its inline render script.
-
-    SvelteKit (csp.mode = 'hash' in svelte.config.js) bakes this into a
-    <meta http-equiv="content-security-policy"> tag in the built HTML.
-    """
-    match = _SVELTEKIT_CSP_META_RE.search(html)
-    return match.group(1).decode("utf-8") if match else None
-
-
-def _strip_csp_meta(html: bytes) -> bytes:
-    stripped = _SVELTEKIT_CSP_META_RE.sub(b"", html)
-    if stripped == html:
-        raise RuntimeError("CSP meta tag not found in SvelteKit index page")
-    return stripped
-
-
 def _untrusted_sveltekit_content_security_policy(
     port: int, script_hash: str | None
 ) -> str:
@@ -158,23 +126,9 @@ def _untrusted_sveltekit_content_security_policy(
     return _untrusted_page_content_security_policy(" ".join(csp_paths))
 
 
-@dataclass
-class BundledFileRequest:
-    # path relative to aqt data folder
-    path: str
-    sveltekit_route: str | None = None
-
-
-@dataclass
-class NotFound:
-    message: str
-
-
-DynamicRequest = Callable[[], Response]
-
-
 class PageContext(enum.IntEnum):
     UNKNOWN = enum.auto()
+    # mediasrv.rs gives this context the editor CSP
     EDITOR = enum.auto()
     REVIEWER = enum.auto()
     PREVIEWER = enum.auto()
@@ -193,55 +147,67 @@ class LegacyPage:
     context: PageContext
 
 
-class MediaServer(threading.Thread):
-    _ready = threading.Event()
-    daemon = True
+class MediaServer:
+    """Runs the server in rsbridge; see the module docstring."""
 
     def __init__(self, mw: aqt.main.AnkiQt) -> None:
-        super().__init__()
+        self.mw = mw
         self.is_shutdown = False
         # map of webview ids to pages
         self._legacy_pages: dict[int, LegacyPage] = {}
+        self._server: Any = None
 
-    def run(self) -> None:
-        try:
-            desired_host = os.getenv("ANKI_API_HOST", "127.0.0.1")
-            desired_port = int(os.getenv("ANKI_API_PORT") or 0)
-            self.server = create_server(
-                app,
-                host=desired_host,
-                port=desired_port,
-                clear_untrusted_proxy_headers=True,
-            )
-            logger.info(
-                "Serving on http://%s:%s",
-                self.server.effective_host,  # type: ignore[union-attr]
-                self.server.effective_port,  # type: ignore[union-attr]
-            )
+    def start(self) -> None:
+        from anki._rsbridge import MediaServer as RustMediaServer
 
-            self._ready.set()
-            self.server.run()
+        host = os.getenv("ANKI_API_HOST", "127.0.0.1")
+        self._server = RustMediaServer(
+            host,
+            int(os.getenv("ANKI_API_PORT") or 0),
+            str(aqt_data_path() / "web"),
+            self.mw.pm.addonFolder(),
+            _PythonHandler(),
+            allow_any_host=host == "0.0.0.0",
+        )
+        port = self._server.port
+        self._server.set_csp(
+            TRUSTED_PAGE_CSP,
+            UNTRUSTED_MEDIA_CSP,
+            _legacy_editor_content_security_policy(port),
+            _untrusted_sveltekit_content_security_policy(port, "{hash}"),
+        )
+        if _flask_app is not None:
+            self._server.set_python_routes(True)
+        aqt.gui_hooks.collection_did_load.append(self._on_collection_did_load)
+        aqt.gui_hooks.profile_did_open.append(self.update_media_file_filter)
+        logger.info("Serving on http://%s:%s", host, port)
 
-        except Exception:
-            if not self.is_shutdown:
-                raise
+    def _on_collection_did_load(self, col: Any) -> None:
+        self._server.set_media_dir(col.media.dir())
+        self.update_media_file_filter()
+
+    def update_media_file_filter(self) -> None:
+        """Call after adding a hooks.media_file_filter handler at runtime."""
+        if self._server:
+            self._server.set_filter_media_paths(bool(hooks.media_file_filter._hooks))
+
+    def set_web_exports(self, addon: str, pattern: str | None) -> None:
+        if self._server:
+            self._server.set_web_exports(addon, pattern)
 
     def shutdown(self) -> None:
         self.is_shutdown = True
-        sockets = list(self.server._map.values())  # type: ignore
-        for socket in sockets:
-            socket.handle_close()
-        # https://github.com/Pylons/webtest/blob/4b8a3ebf984185ff4fefb31b4d0cf82682e1fcf7/webtest/http.py#L93-L104
-        self.server.task_dispatcher.shutdown()
+        if self._server:
+            self._server.shutdown()
 
     def getPort(self) -> int:
-        self._ready.wait()
-        return int(self.server.effective_port)  # type: ignore
+        return int(self._server.port)
 
     def set_page_html(
         self, id: int, html: str, context: PageContext = PageContext.UNKNOWN
     ) -> None:
         self._legacy_pages[id] = LegacyPage(html, context)
+        self._server.set_page(id, html, int(context))
 
     def get_page(self, id: int) -> LegacyPage | None:
         return self._legacy_pages.get(id)
@@ -259,74 +225,69 @@ class MediaServer(threading.Thread):
             return None
 
     def clear_page_html(self, id: int) -> None:
-        try:
-            del self._legacy_pages[id]
-        except KeyError:
-            pass
+        self._legacy_pages.pop(id, None)
+        if self._server:
+            self._server.clear_page(id)
 
 
-@app.route("/favicon.ico")
-def favicon() -> Response:
-    request = BundledFileRequest(os.path.join("imgs", "favicon.ico"))
-    return _handle_builtin_file_request(request)
+# Requests and responses of the Python handlers
+##########################################################################
 
 
-@app.route("/_anki/readyz")
-def readyz() -> Response:
-    """Reports whether the profile's collection is open.
+class Headers:
+    """Case-insensitive request headers."""
 
-    The HTTP server starts listening before the profile/collection finishes
-    loading (setupMediaServer() runs synchronously in AnkiQt.__init__, while
-    setupProfile() is deferred via a QTimer), so callers that need the
-    collection open - e.g. the e2e test harness's webServer readiness check -
-    should poll this instead of /favicon.ico, which responds regardless of
-    collection state.
-    """
-    if aqt.mw.col is None:
-        return Response(status=HTTPStatus.SERVICE_UNAVAILABLE)
-    return Response(status=HTTPStatus.OK)
+    def __init__(self, items: list[tuple[str, str]]) -> None:
+        self._items = {name.lower(): value for name, value in items}
+
+    def get(self, name: str, default: Any = None) -> Any:
+        return self._items.get(name.lower(), default)
+
+    def __contains__(self, name: str) -> bool:
+        return name.lower() in self._items
 
 
-def _mime_for_path(path: str) -> str:
-    "Mime type for provided path/filename."
+@dataclass
+class Request:
+    method: str
+    # with a leading /
+    path: str
+    args: dict[str, str]
+    headers: Headers
+    data: bytes
 
-    _, ext = os.path.splitext(path)
-    ext = ext.lower()
 
-    # Badly-behaved apps on Windows can alter the standard mime types in the registry, which can completely
-    # break Anki's UI. So we hard-code the most common extensions.
-    mime_types = {
-        ".css": "text/css",
-        ".js": "application/javascript",
-        ".mjs": "application/javascript",
-        ".html": "text/html",
-        ".htm": "text/html",
-        ".svg": "image/svg+xml",
-        ".png": "image/png",
-        ".jpg": "image/jpeg",
-        ".jpeg": "image/jpeg",
-        ".gif": "image/gif",
-        ".webp": "image/webp",
-        ".ico": "image/x-icon",
-        ".json": "application/json",
-        ".woff": "font/woff",
-        ".woff2": "font/woff2",
-        ".ttf": "font/ttf",
-        ".otf": "font/otf",
-        ".mp3": "audio/mpeg",
-        ".mp4": "video/mp4",
-        ".webm": "video/webm",
-        ".ogg": "audio/ogg",
-        ".pdf": "application/pdf",
-        ".txt": "text/plain",
-    }
+@dataclass
+class Response:
+    data: bytes | str = b""
+    status: int = HTTPStatus.OK
+    headers: dict[str, str] = field(default_factory=dict)
 
-    if mime := mime_types.get(ext):
-        return mime
-    else:
-        # fallback to mimetypes, which may consult the registry
-        mime, _encoding = mimetypes.guess_type(path)
-        return mime or "application/octet-stream"
+    def body(self) -> bytes:
+        return self.data.encode("utf8") if isinstance(self.data, str) else self.data
+
+
+class HTTPError(Exception):
+    def __init__(self, status: int) -> None:
+        super().__init__(f"HTTP {status}")
+        self.status = status
+
+
+def abort(status: int) -> None:
+    raise HTTPError(status)
+
+
+_current = threading.local()
+
+
+class _RequestProxy:
+    """The request that the current thread handles, like flask.request."""
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(_current.request, name)
+
+
+request = cast(Request, _RequestProxy())
 
 
 def _text_response(code: HTTPStatus, text: str) -> Response:
@@ -334,9 +295,15 @@ def _text_response(code: HTTPStatus, text: str) -> Response:
 
     Response is returned as text/plain, so no escaping of untrusted
     input is required."""
-    resp = flask.make_response(text, code)
-    resp.headers["Content-type"] = "text/plain"
-    return resp
+    return Response(text, code, {"Content-Type": "text/plain"})
+
+
+DynamicRequest = Callable[[], Response]
+
+
+@dataclass
+class NotFound:
+    message: str
 
 
 class UnsafePathException(Exception):
@@ -373,154 +340,6 @@ def is_localhost_origin(origin: str) -> bool:
     return False
 
 
-def _handle_local_file_request(request: LocalFileRequest) -> Response:
-    directory = request.root
-    path = request.path
-    try:
-        isdir = os.path.isdir(os.path.join(directory, path))
-    except ValueError:
-        return _text_response(
-            HTTPStatus.BAD_REQUEST, f"Path for '{directory} - {path}' is too long!"
-        )
-
-    fullpath = ensure_safe_path(directory, path)
-
-    if isdir:
-        return _text_response(
-            HTTPStatus.FORBIDDEN,
-            f"Path for '{directory} - {path}' is a directory (not supported)!",
-        )
-
-    try:
-        mimetype = _mime_for_path(fullpath)
-        if os.path.exists(fullpath):
-            if fullpath.endswith(".css"):
-                # caching css files prevents flicker in the webview, but we want
-                # a short cache
-                max_age = 10
-            elif fullpath.endswith(".js"):
-                # don't cache js files
-                max_age = 0
-            else:
-                max_age = 60 * 60
-            response = flask.send_file(
-                fullpath,
-                mimetype=mimetype,
-                conditional=True,
-                max_age=max_age,
-                download_name="foo",  # type: ignore[call-arg]
-            )
-            if request.untrusted:
-                # Prevent user-provided HTML/SVG from running as an active document.
-                response.headers["Content-Security-Policy"] = UNTRUSTED_MEDIA_CSP
-            return response
-        else:
-            print(f"Not found: {path}")
-            return _text_response(HTTPStatus.NOT_FOUND, f"Invalid path: {path}")
-
-    except Exception as error:
-        if dev_mode:
-            print(
-                "Caught HTTP server exception,\n%s"
-                % "".join(traceback.format_exception(*sys.exc_info())),
-            )
-
-        # swallow it - user likely surfed away from
-        # review screen before an image had finished
-        # downloading
-        return _text_response(HTTPStatus.INTERNAL_SERVER_ERROR, str(error))
-
-
-def _builtin_data(path: str) -> bytes:
-    """Return data from file in aqt/data folder."""
-    full_path = ensure_safe_path(aqt_data_path().parent, path)
-    with open(full_path, "rb") as f:
-        return f.read()
-
-
-def _handle_builtin_file_request(request: BundledFileRequest) -> Response:
-    path = request.path
-    # do we need to serve the fallback page?
-    immutable = "immutable" in path
-    if path.startswith("sveltekit/") and not immutable:
-        path = "sveltekit/index.html"
-    mimetype = _mime_for_path(path)
-    data_path = f"data/web/{path}"
-    try:
-        data = _builtin_data(data_path)
-        response = Response(data, mimetype=mimetype)
-        if immutable:
-            response.headers["Cache-Control"] = "max-age=31536000"
-        if request.sveltekit_route:
-            is_index = path.endswith("index.html")
-            if is_untrusted_sveltekit_route(request.sveltekit_route):
-                script_hash = _sveltekit_render_script_hash(data) if is_index else None
-                response.headers["Content-Security-Policy"] = (
-                    _untrusted_sveltekit_content_security_policy(
-                        aqt.mw.mediaServer.getPort(), script_hash
-                    )
-                )
-            elif is_index:
-                # Replace the default CSP directive set in the SvelteKit config
-                response.set_data(_strip_csp_meta(data))
-                response.headers["Content-Security-Policy"] = TRUSTED_PAGE_CSP
-        elif mimetype == "text/html":
-            response.headers["Content-Security-Policy"] = TRUSTED_PAGE_CSP
-
-        return response
-    except FileNotFoundError:
-        if dev_mode:
-            print(f"404: {data_path}")
-        resp = _text_response(HTTPStatus.NOT_FOUND, f"Invalid path: {path}")
-        # we're including the path verbatim in our response, so we need to either use
-        # plain text, or escape HTML characters to avoid reflecting untrusted input
-        resp.headers["Content-type"] = "text/plain"
-        return resp
-    except Exception as error:
-        if dev_mode:
-            print(
-                "Caught HTTP server exception,\n%s"
-                % "".join(traceback.format_exception(*sys.exc_info())),
-            )
-
-        # swallow it - user likely surfed away from
-        # review screen before an image had finished
-        # downloading
-        return _text_response(HTTPStatus.INTERNAL_SERVER_ERROR, str(error))
-
-
-@app.route("/<path:pathin>", methods=["GET", "POST"])
-def handle_request(pathin: str) -> Response:
-    if os.environ.get("ANKI_API_HOST") != "0.0.0.0":
-        host = request.headers.get("Host", "").lower()
-        origin = request.headers.get("Origin", "").lower()
-        allowed_hosts = tuple(f"{h}:" for h in _LOCALHOST_HOSTS)
-        if not any(host.startswith(h) for h in allowed_hosts):
-            logger.warning("denied non-local host: %s", host)
-            abort(403)
-        if origin and not is_localhost_origin(origin):
-            logger.warning("denied non-local origin: %s", origin)
-            abort(403)
-
-    req = _extract_request(pathin)
-    logger.debug("%s /%s", flask.request.method, pathin)
-
-    try:
-        if isinstance(req, NotFound):
-            print(req.message)
-            return _text_response(HTTPStatus.NOT_FOUND, f"Invalid path: {pathin}")
-        elif callable(req):
-            return _handle_dynamic_request(req)
-        elif isinstance(req, BundledFileRequest):
-            return _handle_builtin_file_request(req)
-        elif isinstance(req, LocalFileRequest):
-            return _handle_local_file_request(req)
-        else:
-            return _text_response(HTTPStatus.FORBIDDEN, f"unexpected request: {pathin}")
-    except UnsafePathException as exc:
-        return _text_response(HTTPStatus.FORBIDDEN, str(exc))
-
-
 def get_sveltekit_route(path: str) -> str | None:
     page_name = path.split("/", maxsplit=1)[0]
     if page_name in [
@@ -544,106 +363,17 @@ def is_untrusted_sveltekit_route(route: str) -> bool:
     return route in ("editor", "image-occlusion")
 
 
-def _extract_internal_request(
-    path: str,
-) -> BundledFileRequest | DynamicRequest | NotFound | None:
-    "Catch /_anki references and rewrite them to web export folder."
-    sveltekit_route = get_sveltekit_route(path)
-    if sveltekit_route:
-        path = f"_anki/sveltekit/_app/{path}"
-    if path.startswith("_app/"):
-        path = path.replace("_app", "_anki/sveltekit/_app")
+def readyz() -> Response:
+    """Reports whether the profile's collection is open.
 
-    prefix = "_anki/"
-    if not path.startswith(prefix):
-        return None
-
-    dirname = os.path.dirname(path)
-    filename = os.path.basename(path)
-    additional_prefix = None
-
-    if dirname == "_anki":
-        if flask.request.method == "POST":
-            return _extract_collection_post_request(filename)
-        elif get_handler := _extract_dynamic_get_request(filename):
-            return get_handler
-
-        # remap legacy top-level references
-        base, ext = os.path.splitext(filename)
-        if ext == ".css":
-            additional_prefix = "css/"
-        elif ext == ".js":
-            if base in ("jquery-ui", "jquery", "plot"):
-                additional_prefix = "js/vendor/"
-            else:
-                additional_prefix = "js/"
-    # handle requests for vendored libraries
-    elif dirname == "_anki/js/vendor":
-        base, ext = os.path.splitext(filename)
-
-        if base == "jquery":
-            base = "jquery.min"
-            additional_prefix = "js/vendor/"
-
-        elif base == "jquery-ui":
-            base = "jquery-ui.min"
-            additional_prefix = "js/vendor/"
-
-    if additional_prefix:
-        oldpath = path
-        path = f"{prefix}{additional_prefix}{base}{ext}"
-        print(f"legacy {oldpath} remapped to {path}")
-
-    return BundledFileRequest(path=path[len(prefix) :], sveltekit_route=sveltekit_route)
-
-
-def _extract_addon_request(path: str) -> LocalFileRequest | NotFound | None:
-    "Catch /_addons references and rewrite them to addons folder."
-    prefix = "_addons/"
-    if not path.startswith(prefix):
-        return None
-
-    addon_path = path[len(prefix) :]
-
-    try:
-        manager = aqt.mw.addonManager
-    except AttributeError as error:
-        if dev_mode:
-            print(f"_redirectWebExports: {error}")
-        return None
-
-    try:
-        addon, sub_path = addon_path.split("/", 1)
-    except ValueError:
-        return None
-    if not addon:
-        return None
-
-    pattern = manager.getWebExports(addon)
-    if not pattern:
-        return None
-
-    if re.fullmatch(pattern, sub_path):
-        return LocalFileRequest(
-            root=manager.addonsFolder(), path=addon_path, untrusted=False
-        )
-
-    return NotFound(message=f"couldn't locate item in add-on folder {path}")
-
-
-def _extract_request(
-    path: str,
-) -> LocalFileRequest | BundledFileRequest | DynamicRequest | NotFound:
-    if internal := _extract_internal_request(path):
-        return internal
-    elif addon := _extract_addon_request(path):
-        return addon
-
-    if not aqt.mw.col:
-        return NotFound(message=f"collection not open, ignore request for {path}")
-
-    path = hooks.media_file_filter(path)
-    return LocalFileRequest(root=aqt.mw.col.media.dir(), path=path)
+    The HTTP server starts listening before the profile/collection finishes
+    loading, so callers that need the collection open - e.g. the e2e test
+    harness's webServer readiness check - should poll this instead of
+    /favicon.ico, which responds regardless of collection state.
+    """
+    if aqt.mw.col is None:
+        return Response(status=HTTPStatus.SERVICE_UNAVAILABLE)
+    return Response(status=HTTPStatus.OK)
 
 
 def congrats_info() -> bytes:
@@ -1285,16 +1015,14 @@ def _extract_collection_post_request(path: str) -> DynamicRequest | NotFound:
         # convert bytes/None into response
         def wrapped() -> Response:
             try:
-                import inspect
-
                 if inspect.iscoroutinefunction(handler):
                     data = asyncio.run(handler())
                 else:
-                    result = handler()
-                    data = result
+                    data = handler()
                 if data:
-                    response = flask.make_response(data)
-                    response.headers["Content-Type"] = "application/binary"
+                    response = Response(
+                        data, headers={"Content-Type": "application/binary"}
+                    )
                 else:
                     response = _text_response(HTTPStatus.NO_CONTENT, "")
             except Exception as exc:
@@ -1307,7 +1035,7 @@ def _extract_collection_post_request(path: str) -> DynamicRequest | NotFound:
         return NotFound(message=f"{path} not found")
 
 
-def _check_dynamic_request_permissions():
+def _check_dynamic_request_permissions() -> None:
     if request.method == "GET":
         return
 
@@ -1319,7 +1047,7 @@ def _check_dynamic_request_permissions():
     # check content type header to ensure this isn't an opaque request from another origin
     if request.headers.get("Content-type") != "application/binary":
         aqt.mw.taskman.run_on_main(warn)
-        abort(403)
+        abort(HTTPStatus.FORBIDDEN)
 
     # does page have access to entire API?
     if _have_api_access():
@@ -1337,7 +1065,7 @@ def _check_dynamic_request_permissions():
         # other legacy pages may contain third-party JS, so we do not
         # allow them to access our API
         aqt.mw.taskman.run_on_main(warn)
-        abort(403)
+        abort(HTTPStatus.FORBIDDEN)
 
 
 def _handle_dynamic_request(req: DynamicRequest) -> Response:
@@ -1346,24 +1074,6 @@ def _handle_dynamic_request(req: DynamicRequest) -> Response:
         return req()
     except Exception as e:
         return _text_response(HTTPStatus.INTERNAL_SERVER_ERROR, str(e))
-
-
-def legacy_page_data() -> Response:
-    id = int(request.args["id"])
-    page = aqt.mw.mediaServer.get_page(id)
-    if page:
-        response = Response(page.html, mimetype="text/html")
-        # Prevent JS in field content from being executed in the editor, as it would
-        # have access to our internal API, and is a security risk.
-        if page.context == PageContext.EDITOR:
-            response.headers["Content-Security-Policy"] = (
-                _legacy_editor_content_security_policy(aqt.mw.mediaServer.getPort())
-            )
-        else:
-            response.headers["Content-Security-Policy"] = TRUSTED_PAGE_CSP
-        return response
-    else:
-        return _text_response(HTTPStatus.NOT_FOUND, "page not found")
 
 
 _APIKEY = secrets.token_urlsafe(32)
@@ -1376,10 +1086,110 @@ def _have_api_access() -> bool:
     )
 
 
-# this currently only handles a single method; in the future, idempotent
-# requests like i18nResources should probably be moved here
-def _extract_dynamic_get_request(path: str) -> DynamicRequest | None:
-    if path == "legacyPageData":
-        return legacy_page_data
-    else:
-        return None
+class _PythonHandler:
+    """Called by mediasrv.rs on its own threads, not the main thread."""
+
+    def handle(
+        self,
+        method: str,
+        path: str,
+        query: str,
+        headers: list[tuple[str, str]],
+        body: bytes,
+    ) -> tuple[int, list[tuple[str, str]], bytes]:
+        _current.request = Request(
+            method=method,
+            path=f"/{path}",
+            args=dict(urllib.parse.parse_qsl(query)),
+            headers=Headers(headers),
+            data=body,
+        )
+        try:
+            response = self._dispatch(path)
+        except HTTPError as exc:
+            status = HTTPStatus(exc.status)
+            response = _text_response(status, status.phrase)
+        except Exception as exc:
+            print(traceback.format_exc())
+            response = _text_response(HTTPStatus.INTERNAL_SERVER_ERROR, str(exc))
+        finally:
+            _current.request = None
+        return int(response.status), list(response.headers.items()), response.body()
+
+    def _dispatch(self, path: str) -> Response:
+        logger.debug("%s /%s", request.method, path)
+        if path == "_anki/readyz":
+            return readyz()
+        if path.startswith("_anki/") and request.method == "POST":
+            req = _extract_collection_post_request(path[len("_anki/") :])
+            if isinstance(req, NotFound):
+                print(req.message)
+                return _text_response(HTTPStatus.NOT_FOUND, f"Invalid path: {path}")
+            return _handle_dynamic_request(req)
+        if _flask_app is not None:
+            return _call_flask_app(path)
+        return _not_handled()
+
+    def filter_media_path(self, path: str) -> str:
+        return hooks.media_file_filter(path)
+
+    def match_web_export(self, addon: str, sub_path: str) -> bool:
+        pattern = aqt.mw.addonManager.getWebExports(addon)
+        return bool(pattern and re.fullmatch(pattern, sub_path))
+
+
+def _not_handled() -> Response:
+    # mediasrv.rs serves the path as a media file instead
+    return Response(status=HTTPStatus.NOT_FOUND, headers={"X-Anki-Not-Handled": "1"})
+
+
+# Add-ons can add routes to a Flask app here, as they could when the server used
+# Flask. Flask is only imported when an add-on uses it.
+
+_flask_app: Any = None
+
+
+def _get_flask_app() -> Any:
+    global _flask_app
+    if _flask_app is None:
+        import flask
+
+        _flask_app = flask.Flask(__name__, root_path="/fake")
+        mw = getattr(aqt, "mw", None)
+        if mw and getattr(mw, "mediaServer", None) and mw.mediaServer._server:
+            mw.mediaServer._server.set_python_routes(True)
+    return _flask_app
+
+
+def _call_flask_app(path: str) -> Response:
+    from werkzeug.exceptions import MethodNotAllowed
+    from werkzeug.exceptions import NotFound as WerkzeugNotFound
+    from werkzeug.test import EnvironBuilder
+
+    adapter = _flask_app.url_map.bind("localhost")
+    try:
+        adapter.match(f"/{path}", method=request.method)
+    except (WerkzeugNotFound, MethodNotAllowed):
+        return _not_handled()
+    environ = EnvironBuilder(
+        path=f"/{path}",
+        method=request.method,
+        query_string=urllib.parse.urlencode(request.args),
+        headers=list(request.headers._items.items()),
+        data=request.data,
+    ).get_environ()
+    status_and_headers: list[Any] = []
+
+    def start_response(status: str, headers: list, exc_info: Any = None) -> None:
+        status_and_headers[:] = [int(status.split(maxsplit=1)[0]), dict(headers)]
+
+    body = b"".join(_flask_app(environ, start_response))
+    return Response(body, status_and_headers[0], status_and_headers[1])
+
+
+if not TYPE_CHECKING:
+
+    def __getattr__(name: str) -> Any:
+        if name == "app":
+            return _get_flask_app()
+        raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

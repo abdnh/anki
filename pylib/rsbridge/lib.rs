@@ -5,6 +5,8 @@ use std::ffi::c_char;
 use std::ffi::c_void;
 use std::ffi::CStr;
 
+mod mediasrv;
+
 use anki::backend::init_backend;
 use anki::backend::Backend as RustBackend;
 use anki::log::set_global_logger;
@@ -111,6 +113,7 @@ impl Backend {
 #[pymodule]
 fn _rsbridge(_py: Python, m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<Backend>()?;
+    m.add_class::<mediasrv::MediaServer>()?;
     m.add_wrapped(wrap_pyfunction!(buildhash)).unwrap();
     m.add_wrapped(wrap_pyfunction!(open_backend)).unwrap();
     m.add_wrapped(wrap_pyfunction!(initialize_logging)).unwrap();

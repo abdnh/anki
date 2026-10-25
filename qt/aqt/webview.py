@@ -166,9 +166,11 @@ def _profile_for_kind(kind: AnkiWebViewKind) -> QWebEngineProfile:
     # Create a new profile if not cached
     profile = take_profile()
 
-    interceptor = AuthInterceptor(profile, api_enabled=have_api_access)
-    profile.setUrlRequestInterceptor(interceptor)
     if have_api_access:
+        # Qt calls the interceptor on the main thread for every request, so
+        # the other profile has none
+        interceptor = AuthInterceptor(profile, api_enabled=True)
+        profile.setUrlRequestInterceptor(interceptor)
         _profile_with_api_access = profile
     else:
         _profile_without_api_access = profile

@@ -780,6 +780,8 @@ class AddonManager:
     def setWebExports(self, module: str, pattern: str) -> None:
         addon = self.addonFromModule(module)
         self._webExports[addon] = pattern
+        if media_server := getattr(self.mw, "mediaServer", None):
+            media_server.set_web_exports(addon, pattern)
 
     def getWebExports(self, module: str) -> str:
         return self._webExports.get(module)

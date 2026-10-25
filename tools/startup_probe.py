@@ -305,7 +305,27 @@ def _wrap_profile_creation(module: Any, attr: str) -> None:
 
 
 def _wrap_media_server(mediasrv: Any) -> None:
-    """Time each HTTP request on the media server thread."""
+    """Time each HTTP request that the media server handles in Python. Other
+    requests are only visible in the js:* marks."""
+    handler = getattr(mediasrv, "_PythonHandler", None)
+    if handler is not None:
+        orig_handle = handler.handle
+
+        def handle(self: Any, method: str, path: str, *args: Any) -> Any:
+            start = time.perf_counter()
+            REC.mark("http_first_python_request", start)
+            try:
+                return orig_handle(self, method, path, *args)
+            finally:
+                end = time.perf_counter()
+                name = path.removeprefix("_anki/")
+                REC.span(f"http {name}", start, end)
+                REC.mark(f"http_done:{name}", end)
+
+        handler.handle = handle
+        return
+
+    # older versions served everything with Flask
     app = mediasrv.app
     orig = app.wsgi_app
 

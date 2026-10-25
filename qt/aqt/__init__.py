@@ -753,6 +753,31 @@ def _run(argv: list[str] | None = None, exec: bool = True) -> AnkiApp | None:
     if is_win and "QT_QPA_PLATFORM" not in os.environ:
         os.environ["QT_QPA_PLATFORM"] = "windows:altgr"
 
+    # proxy configured?
+    from urllib.request import getproxies, proxy_bypass
+
+    disable_proxies = False
+    try:
+        if "http" in getproxies():
+            # if it's not set up to bypass localhost, we'll
+            # need to disable proxies in the webviews
+            if not proxy_bypass("127.0.0.1"):
+                disable_proxies = True
+    except UnicodeDecodeError:
+        # proxy_bypass can't handle unicode in hostnames; assume we need
+        # to disable proxies
+        disable_proxies = True
+
+    if disable_proxies:
+        print("webview proxy use disabled")
+        proxy = QNetworkProxy()
+        proxy.setType(QNetworkProxy.ProxyType.NoProxy)
+        QNetworkProxy.setApplicationProxy(proxy)
+    elif is_win:
+        from aqt.proxy import defer_proxy_auto_detection
+
+        defer_proxy_auto_detection()
+
     # create the app
     QCoreApplication.setApplicationName("Anki")
     QGuiApplication.setDesktopFileName("anki")
@@ -790,27 +815,6 @@ def _run(argv: list[str] | None = None, exec: bool = True) -> AnkiApp | None:
     # disable help button in title bar on qt versions that support it
     if is_win and qtmajor == 5 and qtminor >= 10:
         QApplication.setAttribute(Qt.AA_DisableWindowContextHelpButton)  # type: ignore
-
-    # proxy configured?
-    from urllib.request import getproxies, proxy_bypass
-
-    disable_proxies = False
-    try:
-        if "http" in getproxies():
-            # if it's not set up to bypass localhost, we'll
-            # need to disable proxies in the webviews
-            if not proxy_bypass("127.0.0.1"):
-                disable_proxies = True
-    except UnicodeDecodeError:
-        # proxy_bypass can't handle unicode in hostnames; assume we need
-        # to disable proxies
-        disable_proxies = True
-
-    if disable_proxies:
-        print("webview proxy use disabled")
-        proxy = QNetworkProxy()
-        proxy.setType(QNetworkProxy.ProxyType.NoProxy)
-        QNetworkProxy.setApplicationProxy(proxy)
 
     # we must have a usable temp dir
     try:

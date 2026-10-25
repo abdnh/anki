@@ -5,7 +5,9 @@ from unittest.mock import patch
 
 import pytest
 
-from anki.utils import int_version, int_version_to_str
+import platform
+
+from anki.utils import int_version, int_version_to_str, is_win, windows_release
 
 
 @pytest.mark.parametrize(
@@ -53,3 +55,8 @@ def test_int_version_rejects_garbage():
     with patch("anki.buildinfo.version", "not-a-version"):
         with pytest.raises(ValueError):
             int_version()
+
+
+@pytest.mark.skipif(not is_win, reason="Windows only")
+def test_windows_release_matches_platform_win32_ver() -> None:
+    assert windows_release() == platform.win32_ver()[0]

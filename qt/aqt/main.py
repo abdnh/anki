@@ -1011,6 +1011,7 @@ title="{}" {}>{}</button>""".format(
     def setupAddons(self, args: list | None) -> None:
         import aqt.addons
 
+        aqt.inject_truststore()
         self.addonManager = aqt.addons.AddonManager(self)
 
         if args and args[0] and self._isAddon(args[0]):

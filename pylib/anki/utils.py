@@ -274,12 +274,11 @@ def plat_desc() -> str:
     theos = "unknown"
     for _ in range(100):
         try:
-            system = platform.system()
             if is_mac:
                 theos = f"mac:{platform.mac_ver()[0]}"
             elif is_win:
-                theos = f"win:{platform.win32_ver()[0]}"
-            elif system == "Linux":
+                theos = f"win:{windows_release()}"
+            elif (system := platform.system()) == "Linux":
                 import distro  # pytype: disable=import-error
 
                 dist_id = distro.id()
@@ -291,6 +290,21 @@ def plat_desc() -> str:
         except Exception:
             continue
     return theos
+
+
+def windows_release() -> str:
+    """Like platform.win32_ver()[0] (e.g. "11"), without its slow WMI query."""
+    if sys.platform != "win32":
+        return ""
+    ver = sys.getwindowsversion()
+    releases = getattr(
+        platform,
+        "_WIN32_CLIENT_RELEASES" if ver.product_type == 1 else "_WIN32_SERVER_RELEASES",
+        None,
+    )
+    if releases is None:
+        return platform.win32_ver()[0]
+    return next((r for v, r in releases if v <= ver.platform_version), "")
 
 
 # Version

@@ -8,18 +8,42 @@ import atexit
 import logging
 import os
 import sys
+import threading
 from collections.abc import Callable
 from inspect import isclass
 from typing import TYPE_CHECKING, Any, Union, cast
 
-try:
-    import truststore
 
-    truststore.inject_into_ssl()
-except ModuleNotFoundError:
-    print(
-        "Python module truststore is not installed. System certificate store and custom SSL certificates may not work. See: https://github.com/ankitects/anki/issues/3016"
-    )
+def _fill_platform_cache() -> None:
+    import platform
+
+    platform.uname()
+
+
+# On Windows, platform.uname() makes slow WMI queries, and truststore calls it
+# when imported. So the cache is filled in the background, and truststore is
+# injected later, before add-ons load. Code that uses SSL before that must
+# call inject_truststore() first.
+if sys.platform == "win32":
+    threading.Thread(target=_fill_platform_cache, name="platform-cache").start()
+
+_truststore_injected = False
+
+
+def inject_truststore() -> None:
+    global _truststore_injected
+    if _truststore_injected:
+        return
+    _truststore_injected = True
+    try:
+        import truststore
+
+        truststore.inject_into_ssl()
+    except ModuleNotFoundError:
+        print(
+            "Python module truststore is not installed. System certificate store and custom SSL certificates may not work. See: https://github.com/ankitects/anki/issues/3016"
+        )
+
 
 if sys.version_info[0] < 3 or sys.version_info[1] < 9:
     raise Exception("Anki requires Python 3.9+")

@@ -1,11 +1,10 @@
 # Copyright: Ankitects Pty Ltd and contributors
 # License: GNU AGPL, version 3 or later; http://www.gnu.org/licenses/agpl.html
 
+import platform
 from unittest.mock import patch
 
 import pytest
-
-import platform
 
 from anki.utils import int_version, int_version_to_str, is_win, windows_release
 

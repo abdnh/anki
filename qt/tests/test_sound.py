@@ -10,9 +10,9 @@ from unittest.mock import MagicMock
 import pytest
 
 import aqt
+import aqt.sound
 from anki.sound import SoundOrVideoTag
 from anki.utils import is_lin, is_mac, is_win
-import aqt.sound
 from aqt.sound import (
     MpvManager,
     SimpleMplayerPlayer,
